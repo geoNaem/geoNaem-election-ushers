@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f7a4d">
+<title>لجان الجمعية العمومية</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div>
+      <h1>لجان الجمعية العمومية</h1>
+      <p class="date">الجمعة ٢٠/١١/٢٠٢٦</p>
+    </div>
+    <span id="sync" class="sync" role="status"></span>
+  </header>
+
+  <main id="home">
+    <section class="scan" aria-label="مسح الكارت">
+      <div class="scan-frame">
+        <video id="reader" playsinline muted autoplay></video>
+        <p id="readerHint" class="reader-hint">جارٍ تشغيل الكاميرا…</p>
+        <button id="torchBtn" type="button" class="torch" aria-label="تشغيل الفلاش" aria-pressed="false" hidden>فلاش</button>
+        <span class="corner tr"></span><span class="corner tl"></span><span class="corner br"></span><span class="corner bl"></span>
+      </div>
+      <p class="scan-help">ضع رقم العضوية داخل الإطار</p>
+      <p id="ocrMsg" class="ocr-msg" role="status" hidden></p>
+      <p id="camErr" class="cam-err" hidden>تعذّر تشغيل الكاميرا — اسمح بالوصول للكاميرا أو اكتب الرقم أدناه</p>
+    </section>
+
+    <div class="or"><span>أو اكتب الرقم</span></div>
+
+    <form id="lookupForm" class="manual" autocomplete="off" novalidate>
+      <label for="num">رقم العضوية</label>
+      <input id="num" type="text" inputmode="numeric" placeholder="0000" enterkeyhint="search">
+      <div id="cats" class="chips" role="group" aria-label="نوع العضوية"></div>
+      <button type="submit" class="btn primary">اعرف اللجنة</button>
+    </form>
+  </main>
+
+  <section id="result" class="result ok" hidden aria-live="polite">
+    <div class="res-top">
+      <h2>لجان الجمعية العمومية</h2>
+      <span id="resPill" class="pill"></span>
+    </div>
+    <div class="res-body">
+      <div class="ring-outer"><div class="ring">
+        <div id="resTitle" class="ring-label"></div>
+        <div id="resNum" class="ring-num"></div>
+      </div></div>
+
+      <dl class="facts">
+        <div class="row"><dt>الرقم المقروء</dt><dd class="member"><span id="resMember" class="val big"></span><button id="editBtn" type="button" class="link-btn">عدّل الرقم</button></dd></div>
+        <div class="row type"><dt>نوع العضوية</dt><dd><div id="resCats" class="chips" role="group" aria-label="غيّر نوع العضوية"></div></dd></div>
+        <div class="row block" id="blockRow">
+          <dt>مكان اللجنة</dt>
+          <dd><span id="resBlock" class="val"></span><span id="resBlockNote" class="note"></span></dd>
+        </div>
+      </dl>
+      <p id="resHelp" class="help" hidden>راجع الرقم أو نوع العضوية، أو وجّه العضو لمكتب الاستعلامات.</p>
+    </div>
+    <div class="res-foot"><button id="nextBtn" type="button" class="btn primary">التالي</button></div>
+  </section>
+</div>
+<script src="/js/lookup.js"></script>
+<script src="/js/ocr-parse.js"></script>
+<script src="/js/ocr-preprocess.js"></script>
+<script src="/js/scanner.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

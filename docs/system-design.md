@@ -1,0 +1,82 @@
+# System design
+
+## 1. Goals / non-goals
+**Goals:** correct committee for every member type; block location shown; ≥20 simultaneous ushers; no usher login; keeps working if the venue Wi-Fi drops; tiny ops surface.
+**Non-goals:** member names, attendance tracking, vote recording, multi-event support, user accounts.
+
+## 2. Architecture
+```
+ Usher phone (PWA-ish)                         Server (Node 22, Express 5)
+ ┌───────────────────────────┐   HTTPS   ┌─────────────────────────────────┐
+ │ index.html + app.js       │──────────▶│ GET /api/blocks   (public)      │
+ │ lookup.js  (pure logic)   │           │ static: /, /admin, /data/*.json │
+ │ committees.json (cached)  │           │ PUT /api/admin/blocks (PIN)     │
+ │ blocks (localStorage)     │           │ SQLite (WAL): blocks, audit     │
+ │ sw.js (offline shell)     │           └─────────────────────────────────┘
+ └───────────────────────────┘
+```
+**Key decision:** the committee lookup runs **in the browser** from `committees.json`. The server never sees scanned IDs. Load is therefore trivial (static files + one tiny JSON poll every 30 s per usher) and a network outage cannot stop lookups.
+
+## 3. Logic (the PDF)
+- Source: `data/source/*.pdf` → `scripts/extract_committees.py` → `data/committees.json`: `rows: [suffix, from, to, committee]`.
+- Suffix = card letter: none (working), `ع`, `د`, `ب`, `بع`, `دب`; `*` = foreign/political/refugee → committee 100 for every number.
+- Lookup = binary search over sorted ranges per suffix (`public/js/lookup.js`). Result is a committee or `null` ("not found").
+- Scan parsing accepts `12345`, `822 ع`, `ع822`, Arabic-Indic digits. The type chips handle manual entry so ushers never type Arabic letters.
+- Extraction guards: ranges per suffix contiguous (no gaps/overlaps), working = exactly 1..84, committees 1..100 all present.
+
+## 4. Database (SQLite via better-sqlite3, file `DB_PATH`)
+```
+blocks(id PK, name TEXT 1-40, note TEXT ≤120, position INT)
+block_committees(committee INT PK  -- a committee belongs to at most one block
+                 , block_id FK → blocks ON DELETE CASCADE)
+meta(key PK, value)            -- blocks_version counter (bumped on every save)
+audit_log(id, at, action, ip, detail)  -- login.ok / login.fail / blocks.replace
+```
+Why SQLite: one writer (admins), many readers, single file, WAL, zero ops. Admin saves replace the whole configuration in **one transaction** (all-or-nothing). Move to Postgres only if multiple server instances are needed.
+
+## 5. API
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /api/health` | none | liveness |
+| `GET /api/blocks` | none | `{version, blocks:[{id,name,note,committees:[…]}]}` — public by design (only location info) |
+| `POST /api/admin/login` | CSRF hdr | `{pin}` → sets `adm` cookie (HttpOnly, SameSite=Strict, Secure in prod, 8 h). 5 failures / 15 min / IP → 429 |
+| `POST /api/admin/logout` | CSRF hdr | clears cookie |
+| `GET /api/admin/session` | cookie | `{authed}` |
+| `PUT /api/admin/blocks` | cookie + CSRF hdr | `{blocks:[{name,note,committees:[int]}]}` full replace. 400 on: >30 blocks, bad name/note, committee ∉ 1..100, committee in two blocks, duplicate names |
+| `GET /api/admin/audit` | cookie | last 50 audit entries |
+CSRF header = `X-Requested-With: admin` + `Content-Type: application/json` (no CORS is enabled, so other sites cannot send these).
+
+## 6. Front end
+Static files, no build step. `app.js` (usher) and `admin.js` are plain ES5-style modules wrapped in IIFEs; DOM built with `textContent`/`createElement`. State: `localStorage` keys `committees`, `blocks` (fallback when offline). `sw.js` precaches the shell (stale-while-revalidate) so the app starts with no network. Camera + number reader: see §6a. Results pause the reader; **التالي** resumes it. Same number within 3 s is ignored.
+
+## 6a. Number scanner (on-device OCR)
+The card's **printed membership number** is read, not a barcode/QR. Pipeline (all in the browser; frames and text never leave the device):
+`getUserMedia (rear camera, 1280x720)` → crop the visible 3:1 viewfinder strip (`OcrPre.coverCrop`) → 640x213 canvas → grayscale → 2–98% contrast stretch → Otsu threshold (dark text on white) → `tesseract.js` 7.0.0 in a Web Worker (`eng`, LSTM, digits-only whitelist, PSM 7 single line) → `OcrParse.extract` (Arabic-Indic/Persian digits → Western, O/l/S/B/Z→digit fixes only inside mostly-digit tokens, 1–6 digits, non-zero, optional suffix via `Lookup.parseScan`) → `OcrParse.createConsensus` (same number+suffix in 3 consecutive frames, or one frame at confidence ≥ 97; same number ignored for 3 s) → `showResult`.
+Files: `public/js/scanner.js` (camera/worker/loop), `ocr-preprocess.js`, `ocr-parse.js` (pure, unit-tested), engine in `public/ocr/t7.0.0/` (pinned, self-hosted, licences included, ~14 MB precached by the service worker under a versioned cache name).
+Loop: ≈3–4 frames/s (250 ms pause between recognitions). Engine loads lazily after first paint ("جارٍ تجهيز القارئ…"). Paused while a result is shown and while the tab is hidden (camera released). If the average recognition time exceeds 2.5 s a notice suggests manual entry; if the engine fails to load the notice says so; manual entry is always on the same screen.
+Result screen shows the recognised number with **عدّل الرقم** (back to the form, pre-filled) and type chips (OCR often cannot see the suffix letter; default = working) that re-run the lookup instantly.
+**Card format (B0): UNVERIFIED.** No real card photos were available. Working assumptions, to be confirmed from `tests/fixtures/cards/`: Western digits 0–9, single line, number only (suffix letter probably not printed → chips), up to 5 digits (max 72983). If cards print Arabic-Indic digits, switch to `ara` language data (add the file to `public/ocr/t7.0.0/lang`, the SW list and the worker call); if the suffix letter is printed and must be read, add `ara` and extend the whitelist.
+Failure modes: bad light (torch button, contrast stretch), glare (tilt; Otsu may merge digits → consensus rejects), worn/embossed card (low confidence → no stable read → manual), wrong digit (shown prominently + one-tap edit; consensus makes isolated misreads rare), two numbers on the card (first plausible 1–6-digit token wins — UNVERIFIED), camera denied (message, manual works).
+Accuracy tool: `npm run ocr:eval` (dev-only, label = file name, e.g. `2367.jpg`, `822_ع.png`).
+
+## 7. Failure modes
+| Failure | Behaviour |
+|---|---|
+| Wi-Fi drops | Lookup continues from cache; pill shows "غير متصل"; blocks edits made meanwhile appear when back online |
+| Server down | Same as above for ushers; admin cannot save |
+| Camera denied/broken | Error text; manual entry is already on screen |
+| OCR misreads / cannot read the card | Number shown prominently, **عدّل الرقم**; manual entry always on screen |
+| Admin forgets to assign a block | Result shows "لم يُحدَّد المكان بعد" (committee still shown) |
+| Corrupt/old PDF data | Extraction script refuses to write; tests guard every range |
+
+## 8. Deployment
+Docker image (Node 22 slim, non-root), volume at `/data`. Env: `ADMIN_PIN`, `SESSION_SECRET`, `NODE_ENV=production`, `TRUST_PROXY=1`, `DB_PATH=/data/app.db`. One instance is enough for 20 ushers (hundreds would be fine). Back up `/data/app.db` before and after the event.
+
+## 9. Decisions log
+1. Client-side lookup (privacy, offline, load) — chosen over server lookup.
+2. SQLite over Postgres/Supabase — one file, no external service on election day.
+3. Shared admin PIN over accounts — matches "keep it simple"; mitigated by rate limit, audit log, HTTPS-only cookie, short session.
+4. No framework/build — fewer failure points; the whole app is ~1k lines.
+5. Blocks are public read — they only say where a committee is, not who anyone is.
+6. **Number scanner = on-device OCR (tesseract.js) instead of barcode/QR (html5-qrcode).** The cards carry a printed membership number; no barcode contents were confirmed. OCR keeps the privacy rule (nothing leaves the device) and works offline once the ~14 MB engine is cached. Cost: slower and less reliable than a barcode → consensus rule, edit/type chips, manual fallback, accuracy gate. CSP gains `'wasm-unsafe-eval'` and `worker-src blob:` (see security-qa).
+7. **Hosting: Vercel Functions + Supabase Postgres instead of Express + SQLite (PLANNED, not yet done).** SQLite cannot persist on Vercel. Blocked until the Supabase project is approved/created; until then Express + SQLite remains the running backend.

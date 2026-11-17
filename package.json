@@ -1,0 +1,22 @@
+{
+  "name": "election-ushers",
+  "version": "1.0.0",
+  "description": "Election-day usher tool: member ID -> committee number -> block location",
+  "main": "lib/api.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "extract": "python3 scripts/extract_committees.py",
+    "ocr:eval": "node scripts/ocr-eval.js",
+    "dev": "vercel dev"
+  },
+  "dependencies": {},
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
+    "tesseract.js": "^7.0.0"
+  }
+}
