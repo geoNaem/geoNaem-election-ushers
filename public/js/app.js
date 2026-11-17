@@ -153,7 +153,9 @@
     window.addEventListener('online', refreshBlocks);
     window.addEventListener('offline', function () { setSync(false); });
     // load the OCR engine only after first paint
-    (window.requestAnimationFrame || setTimeout)(function () { setTimeout(startScan, 0); });
+    var started = false, go = function () { if (!started) { started = true; startScan(); } };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(function () { setTimeout(go, 0); });
+    setTimeout(go, 600); // fallback: rAF never fires in a background tab
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
   }
   document.addEventListener('DOMContentLoaded', boot);
