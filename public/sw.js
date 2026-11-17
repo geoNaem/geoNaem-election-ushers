@@ -1,9 +1,9 @@
 /* Offline support: the lookup works with no network after the first visit. */
-var CACHE = 'ushers-v2';
+var CACHE = 'ushers-v3';
 var OCR_VERSION = 'ocr-tess7.0.0-core7.0.0-eng1.0.0'; // bump when /ocr files change
 var OCR_CACHE = 'ushers-' + OCR_VERSION;
 var OCR_FILES = ['/ocr/t7.0.0/tesseract.min.js', '/ocr/t7.0.0/worker.min.js', '/ocr/t7.0.0/tesseract-core-relaxedsimd-lstm.wasm.js', '/ocr/t7.0.0/tesseract-core-simd-lstm.wasm.js', '/ocr/t7.0.0/tesseract-core-lstm.wasm.js', '/ocr/t7.0.0/lang/eng.traineddata.gz'];
-var SHELL = ['/', '/css/base.css', '/css/app.css', '/js/lookup.js', '/js/ocr-parse.js', '/js/ocr-preprocess.js', '/js/scanner.js', '/js/app.js', '/data/committees.json',
+var SHELL = ['/', '/css/base.css', '/css/app.css', '/js/lookup.js', '/js/ocr-parse.js', '/js/ocr-preprocess.js', '/js/ar-digits.js', '/js/ar-digits-model.json', '/js/scanner.js', '/js/app.js', '/data/committees.json', '/img/banner.jpg',
   '/fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2', '/fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2',
   '/fonts/ibm-plex-sans-arabic-arabic-700-normal.woff2', '/fonts/ibm-plex-sans-arabic-latin-600-normal.woff2'];
 

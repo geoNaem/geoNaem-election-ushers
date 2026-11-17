@@ -1,5 +1,5 @@
 /* Camera + on-device OCR, triggered by the usher's "scan" button (no continuous auto-scan).
-   Frames and recognised text never leave the browser: no fetch/upload, no storage, no logging.
+   Reads Western (0-9, Tesseract) and Arabic-Indic (٠-٩, ar-digits.js) digits. Frames and recognised text never leave the browser: no fetch/upload, no storage, no logging.
    Tesseract.js runs in its own Web Worker (UI never blocks); the engine is loaded lazily after first paint.
    REAR camera only: the front camera is never used. */
 (function () {
@@ -16,7 +16,7 @@
   window.Scanner = function (o) {
     // o: { video, boxEl, onStatus(kind, text), onTorch(supported), onBusy(bool), onResult(read|null, rawText) }
     var s = { stream: null, worker: null, canvas: document.createElement('canvas'), torchOn: false, track: null,
-      loading: null, failed: false, busy: false };
+      loading: null, failed: false, busy: false, workers: [] };
     s.canvas.width = OUT_W; s.canvas.height = OUT_H;
     var ctx = s.canvas.getContext('2d', { willReadFrequently: true });
     function status(kind, text) { o.onStatus(kind, text || ''); }
@@ -29,18 +29,25 @@
         document.head.appendChild(el);
       });
     }
+    // Western digits (0-9): Tesseract `eng`, digits-only whitelist. Arabic-Indic digits (٠-٩): Tesseract's `ara` model cannot read
+    // them, so ar-digits.js (a tiny on-device classifier) reads them from the same binarised strip. Both run on-device.
+    function loadArModel() {
+      return fetch('/js/ar-digits-model.json').then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) { if (m && window.ArDigits) window.ArDigits.setModel(m); }).catch(function () {});
+    }
     function loadEngine() {
       if (s.loading) return s.loading;
       status('loading', 'جارٍ تجهيز القارئ…');
-      s.loading = loadScript(OCR_DIR + 'tesseract.min.js').then(function () {
+      s.loading = Promise.all([loadArModel(), loadScript(OCR_DIR + 'tesseract.min.js').then(function () {
         return window.Tesseract.createWorker('eng', 1, {
           workerPath: OCR_DIR + 'worker.min.js', corePath: OCR_DIR, langPath: OCR_DIR + 'lang', gzip: true,
           workerBlobURL: false, cacheMethod: 'none', // the service worker caches these files
         });
       }).then(function (w) {
         return w.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7', user_defined_dpi: '300' })
-          .then(function () { s.worker = w; status('ready', ''); });
-      }).catch(function () { s.failed = true; status('error', 'تعذّر تشغيل قارئ الأرقام — اكتب الرقم أدناه'); });
+          .then(function () { s.workers = [w]; });
+      })]).then(function () { status('ready', ''); })
+        .catch(function () { s.failed = true; status('error', 'تعذّر تشغيل قارئ الأرقام — اكتب الرقم أدناه'); });
       return s.loading;
     }
 
@@ -109,28 +116,45 @@
       if (s.busy) return;
       if (s.failed) { status('error', 'تعذّر تشغيل قارئ الأرقام — اكتب الرقم أدناه'); return; }
       s.busy = true; o.onBusy(true);
-      var ready = s.worker ? Promise.resolve() : loadEngine();
+      var ready = s.workers.length ? Promise.resolve() : loadEngine();
       ready.then(function () {
-        if (!s.worker) return;
+        if (!s.workers.length) return;
         status('reading', 'جارٍ القراءة…');
         var votes = {}, raws = [], seq = Promise.resolve();
         for (var a = 0; a < ATTEMPTS; a++) (function (a) {
           seq = seq.then(function () {
             var cv = grab(a % 4);
             if (!cv) return pause(150);
-            return s.worker.recognize(cv).then(function (r) {
-              var txt = (r.data.text || '').trim(); if (txt) raws.push(txt);
-              var read = P.extract(txt);
-              if (read) {
-                var k = read.n + '|' + read.suf, v = votes[k] || (votes[k] = { read: read, count: 0, conf: 0 });
-                v.count++; v.conf = Math.max(v.conf, r.data.confidence);
+            function vote(read, conf) {
+              var k = read.n + '|' + read.suf, v = votes[k] || (votes[k] = { read: read, count: 0, conf: 0 });
+              v.count++; v.conf = Math.max(v.conf, conf);
+            }
+            // Arabic-Indic digits first (cheap, needs a binary frame); if the strip is clearly Arabic-Indic, Tesseract `eng` would only
+            // produce garbage on it, so skip it for this frame.
+            if (a % 4 !== 1 && window.ArDigits) {
+              var px = ctx.getImageData(0, 0, OUT_W, OUT_H).data, bin = new Uint8Array(OUT_W * OUT_H);
+              for (var i = 0, j = 0; i < bin.length; i++, j += 4) bin[i] = px[j];
+              var ar = window.ArDigits.read(bin, OUT_W, OUT_H);
+              if (ar.script === 'arabic') {
+                raws.push(ar.digits);
+                var arRead = P.extract(ar.digits);
+                if (arRead) vote(arRead, ar.conf * 100);
+                return pause(60);
               }
+            }
+            return Promise.all(s.workers.map(function (w) { return w.recognize(cv).catch(function () { return null; }); })).then(function (rs) {
+              rs.forEach(function (r) {
+                if (!r) return;
+                var txt = (r.data.text || '').trim(); if (txt) raws.push(txt);
+                var read = P.extract(txt);
+                if (read) vote(read, r.data.confidence);
+              });
             }).then(function () { return pause(120); });
           });
         })(a);
         return seq.then(function () {
           var best = null;
-          Object.keys(votes).forEach(function (k) { var v = votes[k]; if (!best || v.count > best.count || (v.count === best.count && v.conf > best.conf)) best = v; });
+          Object.keys(votes).forEach(function (k) { var v = votes[k]; if (!best || v.count > best.count || (v.count === best.count && (v.conf > best.conf || (v.conf === best.conf && String(v.read.n).length > String(best.read.n).length)))) best = v; });
           status('ready', '');
           o.onResult(best ? { n: best.read.n, suf: best.read.suf } : null, raws.join(' | '));
         });

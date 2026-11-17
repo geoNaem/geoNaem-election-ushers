@@ -36,6 +36,7 @@ Lookup: every range start/end/midpoint, known values from the PDF, out-of-range 
 - [ ] Scan 5 real cards of different types (working, ع, د, Port Said, foreign); confirm the **recognised number** equals the printed one; run `npm run ocr:eval` on >= 20 labelled photos (target >= 95%).
 - [ ] OCR conditions: bright indoor, dim room (torch on/off), window daylight, glare on laminate, 15–20° tilt, worn/scratched card, hand shake. Note read time (target <= 2 s).
 - [ ] Wrong read: tap **عدّل الرقم**, number is pre-filled, fix and look up. Change the type chip on the result: committee updates instantly.
+- [ ] Digit scripts: scan cards printing Western digits AND Arabic-Indic digits; both must fill the box correctly (Arabic-Indic accuracy is only validated on synthetic fonts so far).
 - [ ] Camera permission denied: message + manual entry works. Slow phone: slow notice, manual works. Torch button only where supported.
 - [ ] Offline first load of the scanner (airplane mode after one online visit): OCR still loads from cache; check cache size (~14 MB) on low-storage phones.
 - [ ] iOS Safari and Android Chrome: camera, torch, tab switching (camera released and restarted).

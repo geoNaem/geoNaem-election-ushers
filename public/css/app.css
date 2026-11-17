@@ -82,3 +82,7 @@
 .link-btn { min-height: 44px; padding: 0 var(--s3); border: 0; background: none; color: var(--primary-strong); font-size: 15px; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .row.type { align-items: flex-start; flex-direction: column; padding: var(--s3) 0; gap: var(--s2); }
 .row.type dd { width: 100%; }
+
+/* campaign banner: below the controls so it never pushes the scanner/buttons down */
+.banner { margin: var(--s6) 0 0; }
+.banner img { display: block; width: 100%; height: auto; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface); }
