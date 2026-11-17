@@ -11,9 +11,6 @@ No logins for ushers. One shared PIN protects the admin page. Works offline afte
 
 ```bash
 npm install
-cp .env.example .env        # then edit ADMIN_PIN and SESSION_SECRET
-export $(grep -v '^#' .env | xargs)   # or use your shell's way of loading env
-npm start                   # http://localhost:3000   admin: /admin
 npm test                    # 21 tests (lookup, OCR parsing, API, security)
 npm run ocr:eval            # OCR accuracy over tests/fixtures/cards/ (labelled photos, dev-only)
 ```
@@ -51,9 +48,14 @@ If the club issues a corrected PDF: replace the file, run the two commands above
 | بع / دب | Port Said military / ladies | 99 |
 | — | Foreign / political / refugee | 100 |
 
-## Deploy (pick one)
+## Deploy (Vercel + Supabase)
 
-- **Render / Railway / Fly.io** with a persistent disk: build with the included `Dockerfile`, mount a volume at `/data`, set env vars `ADMIN_PIN`, `SESSION_SECRET`, `NODE_ENV=production`, `TRUST_PROXY=1`. HTTPS is automatic on these platforms.
-- **A laptop on the day** + a tunnel (Cloudflare Tunnel / ngrok) for HTTPS. Fine as a fallback; the usher pages still work offline once loaded.
+Pushing to `main` deploys automatically (Vercel project `election-ushers`, no build step beyond copying `committees.json`).
+
+1. Supabase: apply `supabase/migrations/*.sql` in order (MCP `apply_migration` or `supabase db push`).
+2. Vercel env vars (Production + Preview): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (server-side only), `ADMIN_PIN` (>= 6 chars), `SESSION_SECRET` (>= 16 chars) - see `.env.example`.
+3. Push to `main`. HTTPS is automatic (required for the camera).
+
+Local: `npm test`; `npm run dev` needs the Vercel CLI (`vercel dev`) with the env vars above.
 
 See `docs/` for design system, system design, security & QA, and the implementation plan. AI agents: read `AGENTS.md` first.

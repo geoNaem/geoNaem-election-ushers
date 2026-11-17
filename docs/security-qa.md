@@ -9,13 +9,13 @@
 ## 2. Threat model
 | # | Threat | Control (where) | Verified by |
 |---|---|---|---|
-| T1 | Stranger edits blocks | PIN login, signed HttpOnly session, `requireAdmin` (`server/app.js`, `auth.js`) | api.test: anonymous → 401 |
-| T2 | PIN brute force | 5 failures / 15 min / IP → 429 + audit; PIN ≥ 6 chars enforced at boot | api.test: rate limit |
+| T1 | Stranger edits blocks | PIN login, signed HttpOnly session, `requireAdmin` (`lib/api.js`, `lib/auth.js`) | api.test: anonymous → 401 |
+| T2 | PIN brute force | 5 failures / 15 min / IP (Postgres, survives cold starts) → 429 + audit; PIN ≥ 6 chars, functions fail closed otherwise | api.test: rate limit |
 | T3 | CSRF on admin writes | `SameSite=Strict` cookie + required `X-Requested-With: admin` + JSON content-type; no CORS | api.test: CSRF guard |
 | T4 | XSS (stored via block names/notes, or scanned text) | DOM built with `textContent`; strict CSP `script-src 'self'`; input length limits | manual: `<img onerror>` as block name renders as text |
 | T5 | Session theft | Secure+HttpOnly+SameSite=Strict cookie (prod), 8 h expiry, HMAC signature, `SESSION_SECRET` from env | api.test: cookie flags |
 | T6 | Clickjacking | CSP `frame-ancestors 'none'` | header test |
-| T7 | Bad/hostile payloads | Strict validation (`validate.js`), 64 KB body limit, transaction rollback on error | api.test: validation matrix |
+| T7 | Bad/hostile payloads | Strict validation (`lib/validate.js`), 64 KB body limit, transaction rollback on error | api.test: validation matrix |
 | T8 | Info leak via errors | Generic 500 handler; `x-powered-by` off; no stack traces to client | review |
 | T9 | Secrets in repo | `.env`, `data/app.db` git-ignored; boot refuses to start without `ADMIN_PIN` | review |
 | T10 | Supply chain | 2 runtime deps (express, better-sqlite3); OCR engine **vendored and pinned** in `public/ocr/t7.0.0/` (tesseract.js 7.0.0, tesseract.js-core 7.0.0, eng data 1.0.0; Apache-2.0 licences included; no runtime fetch from npm/CDN); dev-only deps for `ocr:eval` (tesseract.js, jpeg-js, pngjs); lockfile committed; `npm audit` before release | `npm audit` |
@@ -24,7 +24,9 @@
 | T11 | DoS at the venue | Static serving + tiny JSON; SQLite WAL; ushers keep working from cache if server is slow | load test (plan) |
 | T12 | Wrong committee shown | Pure-logic unit tests over **every** range boundary; extraction sanity checks | lookup.test |
 
-Residual risks accepted: shared PIN (anyone who knows it is an admin — change it after the event); in-memory rate limiter resets on restart; blocks endpoint is public.
+| T15 | Database exposure | RLS on, no policies, grants revoked for anon/authenticated; service-role key only in Vercel env, never in `public/` | anon-key lockout check; api.test scans `public/` |
+
+Residual risks accepted: shared PIN (anyone who knows it is an admin — rotate it after the event); blocks endpoint is public; the repo is public (no secrets in it).
 
 ## 3. Automated tests (`npm test`, 21 tests)
 Lookup: every range start/end/midpoint, known values from the PDF, out-of-range → null, all 100 committees reachable, scan parsing (Arabic digits, suffixes). OCR: digit normalisation, confusion fixes, suffix extraction, implausible reads, consensus (N frames, reset, high confidence, 3 s cooldown), preprocessing. API: anonymous rejected, login/cookie flags, rate limit, CSRF guard, save + public read + audit, validation matrix, security headers.
@@ -51,4 +53,4 @@ Lookup: every range start/end/midpoint, known values from the PDF, out-of-range 
 **After**: change/revoke the PIN; export audit log; archive DB.
 
 ## 5. Quality gates
-CI (add when a repo exists): `npm ci && npm test && npm audit --omit=dev`. Accuracy gate (manual, needs real photos): `npm run ocr:eval`. No merge with failing tests. Changes to `server/` or `public/js/` go through the `qa-reviewer` and `security-reviewer` agents.
+CI (add when a repo exists): `npm ci && npm test && npm audit --omit=dev`. Accuracy gate (manual, needs real photos): `npm run ocr:eval`. No merge with failing tests. Changes to `api/`, `lib/` or `public/js/` go through the `qa-reviewer` and `security-reviewer` agents.

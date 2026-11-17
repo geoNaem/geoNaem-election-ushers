@@ -6,20 +6,20 @@ Instructions for AI coding agents (Claude Code, Codex, etc.). Humans: see `READM
 A small, high-reliability web app used by 20+ ushers at one event (Friday 20/11/2026). Member ID → committee number (from a PDF) → block location (set by admins). Arabic, RTL, mobile-first. **Simplicity and reliability beat features.**
 
 ## Commands
-- `npm install` · `npm start` (needs `ADMIN_PIN`, `SESSION_SECRET` env) · `npm run dev` · `npm test` · `npm run extract`
+- `npm install` · `npm test` · `npm run extract` · `npm run ocr:eval` · `npm run dev` (= `vercel dev`; needs the env vars in `.env.example`)
 - Tests must pass before any change is considered done: `npm test` (lookup, API, security headers, rate limit, CSRF).
 
 ## Map of the repo
 - `data/source/*.pdf` — official list (read-only source of truth). `data/committees.json` — generated; never hand-edit.
 - `scripts/extract_committees.py` — PDF → JSON, with sanity checks.
-- `server/` — Express 5 + better-sqlite3. `app.js` routes/headers, `auth.js` PIN+session+limiter, `db.js` schema/queries, `validate.js` input validation, `index.js` boot/env.
+- `api/` — thin Vercel Function adapters. `lib/` — `api.js` handlers, `auth.js` PIN+session, `db.js` Supabase adapter, `validate.js` input validation. `supabase/migrations/` — SQL (apply in order). `vercel.json` — headers/CSP/caching.
 - `public/` — static front end, **no build step, no framework**. `js/lookup.js` (pure logic, UMD, unit-tested), `js/app.js` (usher UI), `js/admin.js` (admin UI), `sw.js` (offline), `css/` (tokens in `base.css`).
 - `docs/` — design system, system design, security & QA, plan. Keep them in sync with code.
 
 ## Hard rules
 1. **No inline `<script>` or inline event handlers.** CSP is `script-src 'self'`. Do not loosen it.
 2. **Never build HTML from strings with user/scanned data.** Use `textContent` / DOM APIs (see `el()` in admin.js).
-3. **All admin writes** go through `PUT /api/admin/blocks` with auth cookie + `X-Requested-With: admin` + JSON. Keep validation in `server/validate.js`; add a test for every new rule.
+3. **All admin writes** go through `PUT /api/admin/blocks` with auth cookie + `X-Requested-With: admin` + JSON. Keep validation in `lib/validate.js`; add a test for every new rule.
 4. **No usher login, no personal data.** We store only block config and an audit log. Never log scanned card contents on the server. Never add analytics/third-party scripts or CDNs (fonts and scanner library are self-hosted so it works offline).
 5. **Lookup logic lives only in `public/js/lookup.js`.** Do not re-implement it elsewhere; extend its tests (`tests/lookup.test.js`) first.
 6. Arabic UI copy, RTL layout, tap targets ≥ 44px, text contrast ≥ 4.5:1, never colour alone (see `docs/design-system.md`).
@@ -35,4 +35,4 @@ A small, high-reliability web app used by 20+ ushers at one event (Friday 20/11/
 Tests green · works at 390×844 · RTL correct · no console errors (CSP violations count) · docs updated · no secrets committed.
 
 ## Sub-agents available (`.claude/agents/`)
-`qa-reviewer` (test/regression review) and `security-reviewer` (threat-model review of a diff). Use them before merging anything that touches `server/` or `public/js/`.
+`qa-reviewer` (test/regression review) and `security-reviewer` (threat-model review of a diff). Use them before merging anything that touches `api/`, `lib/` or `public/js/`.
