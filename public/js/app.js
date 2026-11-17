@@ -61,14 +61,14 @@
     }
     $('resHelp').hidden = found;
 
-    $('home').hidden = true;
+    $('home').hidden = true; $('top').hidden = true;
     view.hidden = false;
     $('nextBtn').focus();
     if (navigator.vibrate) navigator.vibrate(found ? 60 : [80, 60, 80]);
   }
   function backToHome() {
     $('result').hidden = true;
-    $('home').hidden = false;
+    $('home').hidden = false; $('top').hidden = false;
     $('num').value = '';
     setCat('');
   }
@@ -123,7 +123,7 @@
   }
   function editNumber() {
     var c = state.cur;
-    $('result').hidden = true; $('home').hidden = false;
+    $('result').hidden = true; $('home').hidden = false; $('top').hidden = false;
     $('num').value = c && c.n ? String(c.n) : '';
     setCat(c ? c.suf : '');
     $('num').focus(); $('num').select();

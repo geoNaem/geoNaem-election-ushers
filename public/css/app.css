@@ -83,6 +83,31 @@
 .row.type { align-items: flex-start; flex-direction: column; padding: var(--s3) 0; gap: var(--s2); }
 .row.type dd { width: 100%; }
 
-/* campaign banner: below the controls so it never pushes the scanner/buttons down */
-.banner { margin: var(--s6) 0 0; }
-.banner img { display: block; width: 100%; height: auto; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface); }
+
+/* ---- compact home: logos + team photo on top, everything above the fold (no scroll on a 390x844 phone) ---- */
+.top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--s3); padding: 10px var(--s4) 2px; }
+.logo { height: 48px; width: auto; display: block; }
+.top-title { text-align: center; }
+.top h1 { font-size: 19px; line-height: 1.3; }
+.date { margin: 0; font-size: 12.5px; display: flex; justify-content: center; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.sync { font-size: 11px; padding: 2px 8px; }
+#home { padding: 0 var(--s4) var(--s3); }
+.team { margin: 0; text-align: center; }
+.team img { display: block; margin: 0 auto; width: auto; max-width: 100%; height: auto; max-height: 20dvh; }
+.team figcaption { margin: 0 0 var(--s2); font-size: 16px; font-weight: 700; color: var(--green-700); line-height: 1.4; }
+.scan-btn { min-height: 46px; font-size: 18px; margin-top: var(--s2); }
+.scan-help { margin-top: 6px; font-size: 13px; }
+.or { margin: var(--s2) 0 0; font-size: 13px; }
+.manual { gap: var(--s2); padding-top: 0; }
+.manual label { font-size: 13px; }
+#num { height: 50px; font-size: 24px; }
+.chips { gap: 6px; }
+.chips button { padding: 0 var(--s3); font-size: 14px; }
+.manual .btn.primary { min-height: 50px; font-size: 18px; }
+/* shorter phones (e.g. 360x740): drop the helper line and label, shrink the photo, so it still fits without scrolling */
+@media (max-height: 780px) {
+  .scan-help, .manual label { display: none; }
+  .team img { max-height: 15dvh; }
+  .logo { height: 40px; }
+  #num { height: 46px; }
+}

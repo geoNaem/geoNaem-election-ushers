@@ -11,15 +11,21 @@
 </head>
 <body>
 <div class="shell">
-  <header class="top">
-    <div>
+  <header class="top" id="top">
+    <img class="logo" src="/img/list-logo.png" width="53" height="48" alt="شعار قائمة أشرف محرم">
+    <div class="top-title">
       <h1>لجان الجمعية العمومية</h1>
-      <p class="date">الجمعة ٢٠/١١/٢٠٢٦</p>
+      <p class="date">الجمعة ٢٠/١١/٢٠٢٦ <span id="sync" class="sync" role="status"></span></p>
     </div>
-    <span id="sync" class="sync" role="status"></span>
+    <img class="logo" src="/img/club-emblem.png" width="35" height="48" alt="شعار نادي الصيد المصري">
   </header>
 
   <main id="home">
+    <figure class="team">
+      <img src="/img/team.png" width="800" height="433" alt="أعضاء قائمة الأستاذ الدكتور أشرف محرم" decoding="async">
+      <figcaption>قائمة الأستاذ الدكتور أشرف محرم</figcaption>
+    </figure>
+
     <section class="scan" aria-label="مسح الكارت">
       <div class="scan-frame">
         <video id="reader" playsinline muted autoplay></video>
@@ -42,9 +48,6 @@
       <button type="submit" class="btn primary">اعرف اللجنة</button>
     </form>
 
-    <figure class="banner">
-      <img src="/img/banner.jpg" width="900" height="768" alt="تنويه من قائمة الأستاذ الدكتور أشرف محرم" loading="lazy" decoding="async">
-    </figure>
   </main>
 
   <section id="result" class="result ok" hidden aria-live="polite">
