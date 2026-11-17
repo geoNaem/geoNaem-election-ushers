@@ -41,10 +41,33 @@
       return s.loading;
     }
 
+    // Rear camera, sharp: demand the environment camera (exact first, so phones cannot fall back to the front one),
+    // ask for 1080p (720p looked soft), and prefer the main rear lens over ultra-wide/macro lenses.
+    var RES = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    function gum(video) { return navigator.mediaDevices.getUserMedia({ audio: false, video: video }); }
+    function openBackCamera() {
+      return gum(Object.assign({ facingMode: { exact: 'environment' } }, RES))
+        .catch(function () { return gum(Object.assign({ facingMode: { ideal: 'environment' } }, RES)); })
+        .then(function (st) {
+          var facing = (st.getVideoTracks()[0].getSettings() || {}).facingMode;
+          if (facing === 'environment' || !navigator.mediaDevices.enumerateDevices) return st;
+          // facing unknown or wrong: labels are readable now that permission is granted -> pick a rear camera by name
+          return navigator.mediaDevices.enumerateDevices().then(function (list) {
+            var cams = list.filter(function (d) { return d.kind === 'videoinput'; });
+            var back = cams.filter(function (d) { return /back|rear|environment|خلف/i.test(d.label); });
+            var main = back.filter(function (d) { return !/ultra|wide|tele|macro|depth/i.test(d.label); });
+            var pick = (main[0] || back[0]);
+            if (!pick || pick.deviceId === (st.getVideoTracks()[0].getSettings() || {}).deviceId) return st;
+            st.getTracks().forEach(function (t) { t.stop(); });
+            return gum(Object.assign({ deviceId: { exact: pick.deviceId } }, RES)).catch(function () { return gum(RES); });
+          }).catch(function () { return st; });
+        });
+    }
+
     function startCamera() {
       if (s.stream) return Promise.resolve();
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status('camera', 'الكاميرا غير متاحة'); return Promise.reject(); }
-      return navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } })
+      return openBackCamera()
         .then(function (st) {
           s.stream = st; o.video.srcObject = st;
           s.track = st.getVideoTracks()[0];
