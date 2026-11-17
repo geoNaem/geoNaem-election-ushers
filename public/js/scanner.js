@@ -1,22 +1,27 @@
-/* Camera + on-device OCR. Frames and recognised text never leave the browser: no fetch/upload, no storage, no logging.
-   Tesseract.js runs in its own Web Worker (UI never blocks); the engine is loaded lazily after first paint. */
+/* Camera + on-device OCR, triggered by the usher's "scan" button (no continuous auto-scan).
+   Frames and recognised text never leave the browser: no fetch/upload, no storage, no logging.
+   Tesseract.js runs in its own Web Worker (UI never blocks); the engine is loaded lazily after first paint.
+   REAR camera only: the front camera is never used. */
 (function () {
   'use strict';
   var P = window.OcrParse, Pre = window.OcrPre;
   var OCR_DIR = '/ocr/t7.0.0/';
-  var OUT_W = 640, OUT_H = 213;       // viewfinder aspect 3:1, upscaled/downscaled to a size Tesseract likes
-  var LOOP_MS = 250;                  // pause between frames => ~3-4 reads/s when the device keeps up
-  var SLOW_MS = 2500;                 // average recognise time above this => warn the usher
+  var OUT_W = 960, OUT_H = 320;       // viewfinder aspect 3:1; a single high-quality read is worth the extra pixels
+  var ATTEMPTS = 4;                   // frames per button press (different preprocessing), best read wins
+  var RES = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+  var FRONT = /front|user|facetime|selfie|أمام/i;
+  var BACK = /back|rear|environment|خلف/i;
+  var NOT_MAIN = /ultra|wide|tele|macro|depth/i;
 
   window.Scanner = function (o) {
-    // o: { video, boxEl, onRead(read), onStatus(kind, text), onTorch(supported) }
-    var s = { stream: null, worker: null, canvas: document.createElement('canvas'), paused: true, running: false, loop: 0,
-      consensus: P.createConsensus(), times: [], torchOn: false, track: null, loading: null, failed: false };
+    // o: { video, boxEl, onStatus(kind, text), onTorch(supported), onBusy(bool), onResult(read|null, rawText) }
+    var s = { stream: null, worker: null, canvas: document.createElement('canvas'), torchOn: false, track: null,
+      loading: null, failed: false, busy: false };
     s.canvas.width = OUT_W; s.canvas.height = OUT_H;
     var ctx = s.canvas.getContext('2d', { willReadFrequently: true });
-
     function status(kind, text) { o.onStatus(kind, text || ''); }
 
+    // ---------- OCR engine (lazy) ----------
     function loadScript(src) {
       return new Promise(function (res, rej) {
         var el = document.createElement('script');
@@ -33,106 +38,111 @@
           workerBlobURL: false, cacheMethod: 'none', // the service worker caches these files
         });
       }).then(function (w) {
-        return w.setParameters({
-          tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7', // single text line
-          user_defined_dpi: '300',
-        }).then(function () { s.worker = w; status('ready', ''); });
+        return w.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7', user_defined_dpi: '300' })
+          .then(function () { s.worker = w; status('ready', ''); });
       }).catch(function () { s.failed = true; status('error', 'تعذّر تشغيل قارئ الأرقام — اكتب الرقم أدناه'); });
       return s.loading;
     }
 
-    // Rear camera, sharp: demand the environment camera (exact first, so phones cannot fall back to the front one),
-    // ask for 1080p (720p looked soft), and prefer the main rear lens over ultra-wide/macro lenses.
-    var RES = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    // ---------- camera: rear only ----------
     function gum(video) { return navigator.mediaDevices.getUserMedia({ audio: false, video: video }); }
+    function settings(st) { return st.getVideoTracks()[0].getSettings() || {}; }
+    function isFront(st) { var t = st.getVideoTracks()[0]; return settings(st).facingMode === 'user' || FRONT.test(t.label || ''); }
+    function stop(st) { st.getTracks().forEach(function (t) { t.stop(); }); }
+
     function openBackCamera() {
       return gum(Object.assign({ facingMode: { exact: 'environment' } }, RES))
         .catch(function () { return gum(Object.assign({ facingMode: { ideal: 'environment' } }, RES)); })
         .then(function (st) {
-          var facing = (st.getVideoTracks()[0].getSettings() || {}).facingMode;
-          if (facing === 'environment' || !navigator.mediaDevices.enumerateDevices) return st;
-          // facing unknown or wrong: labels are readable now that permission is granted -> pick a rear camera by name
+          var facing = settings(st).facingMode;
+          if (facing === 'environment' || (!facing && !isFront(st))) return st;
+          // wrong/unknown camera: labels are readable now -> choose a rear camera by name (main lens first)
           return navigator.mediaDevices.enumerateDevices().then(function (list) {
-            var cams = list.filter(function (d) { return d.kind === 'videoinput'; });
-            var back = cams.filter(function (d) { return /back|rear|environment|خلف/i.test(d.label); });
-            var main = back.filter(function (d) { return !/ultra|wide|tele|macro|depth/i.test(d.label); });
-            var pick = (main[0] || back[0]);
-            if (!pick || pick.deviceId === (st.getVideoTracks()[0].getSettings() || {}).deviceId) return st;
-            st.getTracks().forEach(function (t) { t.stop(); });
-            return gum(Object.assign({ deviceId: { exact: pick.deviceId } }, RES)).catch(function () { return gum(RES); });
-          }).catch(function () { return st; });
+            var cams = list.filter(function (d) { return d.kind === 'videoinput' && BACK.test(d.label) && !FRONT.test(d.label); });
+            var pick = cams.filter(function (d) { return !NOT_MAIN.test(d.label); })[0] || cams[0];
+            stop(st);
+            if (!pick) throw new Error('no rear camera');
+            return gum(Object.assign({ deviceId: { exact: pick.deviceId } }, RES)).then(function (st2) {
+              if (isFront(st2)) { stop(st2); throw new Error('front camera'); }
+              return st2;
+            });
+          });
         });
     }
-
     function startCamera() {
       if (s.stream) return Promise.resolve();
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status('camera', 'الكاميرا غير متاحة'); return Promise.reject(); }
-      return openBackCamera()
-        .then(function (st) {
-          s.stream = st; o.video.srcObject = st;
-          s.track = st.getVideoTracks()[0];
-          var caps = (s.track.getCapabilities && s.track.getCapabilities()) || {};
-          o.onTorch(!!caps.torch);
-          if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) s.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
-          return o.video.play();
-        }).catch(function (e) { status('camera', 'تعذّر تشغيل الكاميرا — اسمح بالوصول للكاميرا أو اكتب الرقم أدناه'); throw e; });
+      return openBackCamera().then(function (st) {
+        s.stream = st; o.video.srcObject = st; s.track = st.getVideoTracks()[0];
+        var caps = (s.track.getCapabilities && s.track.getCapabilities()) || {};
+        o.onTorch(!!caps.torch);
+        if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) s.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+        return o.video.play();
+      }).catch(function (e) {
+        status('camera', e && /rear|front/.test(e.message || '') ? 'لم يتم العثور على الكاميرا الخلفية — اكتب الرقم أدناه' : 'تعذّر تشغيل الكاميرا — اسمح بالوصول للكاميرا أو اكتب الرقم أدناه');
+        throw e;
+      });
     }
     function stopCamera() {
-      if (s.stream) s.stream.getTracks().forEach(function (t) { t.stop(); });
+      if (s.stream) stop(s.stream);
       s.stream = null; s.track = null; s.torchOn = false; o.video.srcObject = null;
     }
 
-    function grab() {
+    // ---------- one button press = a few frames, best read wins ----------
+    // variant 0/2: Otsu black-on-white; 1: contrast-stretched grayscale (Tesseract binarises it itself); 3: Otsu on a tighter centre crop
+    function grab(variant) {
       var v = o.video;
       if (!v.videoWidth || v.readyState < 2) return null;
       var box = o.boxEl.getBoundingClientRect();
       var c = Pre.coverCrop(v.videoWidth, v.videoHeight, box.width / box.height);
+      if (variant === 3) { var k = 0.7; c = { sx: c.sx + c.sw * (1 - k) / 2, sy: c.sy + c.sh * (1 - k) / 2, sw: c.sw * k, sh: c.sh * k }; }
       ctx.drawImage(v, c.sx, c.sy, c.sw, c.sh, 0, 0, OUT_W, OUT_H);
       var img = ctx.getImageData(0, 0, OUT_W, OUT_H);
-      var bin = Pre.process(img.data, OUT_W, OUT_H);
-      for (var i = 0, j = 0; i < bin.length; i++, j += 4) { img.data[j] = img.data[j + 1] = img.data[j + 2] = bin[i]; img.data[j + 3] = 255; }
+      var px = variant === 1 ? Pre.stretch(Pre.toGray(img.data, OUT_W, OUT_H)) : Pre.process(img.data, OUT_W, OUT_H);
+      for (var i = 0, j = 0; i < px.length; i++, j += 4) { img.data[j] = img.data[j + 1] = img.data[j + 2] = px[i]; img.data[j + 3] = 255; }
       ctx.putImageData(img, 0, 0);
       return s.canvas;
     }
+    function pause(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-    function tick() {
-      s.loop = 0;
-      if (s.paused || document.hidden || !s.worker) return;
-      var cv = grab();
-      if (!cv) { s.loop = setTimeout(tick, LOOP_MS); return; }
-      var t0 = performance.now();
-      s.worker.recognize(cv).then(function (r) {
-        s.times.push(performance.now() - t0); if (s.times.length > 8) s.times.shift();
-        if (s.times.length >= 4) {
-          var avg = s.times.reduce(function (a, b) { return a + b; }, 0) / s.times.length;
-          status(avg > SLOW_MS ? 'slow' : 'ready', avg > SLOW_MS ? 'القارئ بطيء على هذا الجهاز — يمكنك كتابة الرقم أدناه' : '');
-        }
-        if (s.paused) return;
-        var read = P.extract(r.data.text);
-        var ok = s.consensus.push(read, r.data.confidence);
-        if (ok) { o.onRead(ok); return; }
-      }).catch(function () {}).then(function () {
-        if (!s.paused && !s.loop) s.loop = setTimeout(tick, LOOP_MS);
-      });
+    function scanOnce() {
+      if (s.busy) return;
+      if (s.failed) { status('error', 'تعذّر تشغيل قارئ الأرقام — اكتب الرقم أدناه'); return; }
+      s.busy = true; o.onBusy(true);
+      var ready = s.worker ? Promise.resolve() : loadEngine();
+      ready.then(function () {
+        if (!s.worker) return;
+        status('reading', 'جارٍ القراءة…');
+        var votes = {}, raws = [], seq = Promise.resolve();
+        for (var a = 0; a < ATTEMPTS; a++) (function (a) {
+          seq = seq.then(function () {
+            var cv = grab(a % 4);
+            if (!cv) return pause(150);
+            return s.worker.recognize(cv).then(function (r) {
+              var txt = (r.data.text || '').trim(); if (txt) raws.push(txt);
+              var read = P.extract(txt);
+              if (read) {
+                var k = read.n + '|' + read.suf, v = votes[k] || (votes[k] = { read: read, count: 0, conf: 0 });
+                v.count++; v.conf = Math.max(v.conf, r.data.confidence);
+              }
+            }).then(function () { return pause(120); });
+          });
+        })(a);
+        return seq.then(function () {
+          var best = null;
+          Object.keys(votes).forEach(function (k) { var v = votes[k]; if (!best || v.count > best.count || (v.count === best.count && v.conf > best.conf)) best = v; });
+          status('ready', '');
+          o.onResult(best ? { n: best.read.n, suf: best.read.suf } : null, raws.join(' | '));
+        });
+      }).catch(function () { status('error', 'تعذّرت القراءة — اكتب الرقم أدناه'); })
+        .then(function () { s.busy = false; o.onBusy(false); });
     }
 
-    function onVis() {
-      if (document.hidden) { api.pause(); stopCamera(); }
-      else if (s.running && !s.resumeBlocked) { api.resume(); }
-    }
-    document.addEventListener('visibilitychange', onVis);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stopCamera(); else if (s.started) startCamera().catch(function () {}); });
 
-    var api = {
-      start: function () {
-        s.running = true;
-        startCamera().then(function () { return loadEngine(); }).then(function () { if (!s.failed) api.resume(); }).catch(function () {});
-      },
-      pause: function () { s.paused = true; clearTimeout(s.loop); s.loop = 0; s.consensus.reset(); },
-      resume: function () {
-        s.resumeBlocked = false; s.consensus.reset();
-        startCamera().then(function () { if (s.worker) { s.paused = false; if (!s.loop) s.loop = setTimeout(tick, LOOP_MS); } }).catch(function () {});
-      },
-      hold: function () { s.resumeBlocked = true; api.pause(); }, // a result is on screen
+    return {
+      start: function () { s.started = true; startCamera().catch(function () {}); loadEngine(); },
+      scan: scanOnce,
       toggleTorch: function () {
         if (!s.track) return Promise.resolve(false);
         var want = !s.torchOn;
@@ -144,6 +154,5 @@
         if (caps.focusMode && caps.focusMode.indexOf('single-shot') >= 0) s.track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).catch(function () {});
       },
     };
-    return api;
   };
 })();

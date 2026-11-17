@@ -63,7 +63,6 @@
 
     $('home').hidden = true;
     view.hidden = false;
-    if (state.scanner) state.scanner.hold();
     $('nextBtn').focus();
     if (navigator.vibrate) navigator.vibrate(found ? 60 : [80, 60, 80]);
   }
@@ -72,7 +71,6 @@
     $('home').hidden = false;
     $('num').value = '';
     setCat('');
-    if (state.scanner) state.scanner.resume();
   }
 
   // ---------- manual entry ----------
@@ -97,7 +95,25 @@
   }
 
   // ---------- number scanner (on-device OCR; see scanner.js) ----------
-  function onRead(r) { showResult(r.n, r.suf); }
+  // The scan button reads the number once and fills the manual box; the usher can edit it, then taps "اعرف اللجنة".
+  function onResult(r, raw) {
+    var msg = $('ocrMsg');
+    if (!r) {
+      msg.className = 'ocr-msg error';
+      msg.textContent = 'لم أتعرّف على رقم — قرّب الكارت وثبّت الكاميرا ثم أعد المحاولة' + (raw ? ' (قرأتُ: ' + raw.slice(0, 40) + ')' : '');
+      msg.hidden = false;
+      return;
+    }
+    msg.hidden = true;
+    $('num').value = String(r.n);
+    setCat(r.suf || '');
+    $('num').focus(); $('num').select();
+    if (navigator.vibrate) navigator.vibrate(40);
+  }
+  function setBusy(b) {
+    var btn = $('scanBtn');
+    btn.disabled = b; btn.textContent = b ? 'جارٍ القراءة…' : 'امسح الرقم';
+  }
   function onStatus(kind, text) {
     var hint = $('readerHint'), msg = $('ocrMsg');
     var inFrame = kind === 'loading' || kind === 'camera';
@@ -114,7 +130,7 @@
   }
   function startScan() {
     if (!window.Scanner || !window.OcrParse) return;
-    state.scanner = window.Scanner({ video: $('reader'), boxEl: document.querySelector('.scan-frame'), onRead: onRead, onStatus: onStatus,
+    state.scanner = window.Scanner({ video: $('reader'), boxEl: document.querySelector('.scan-frame'), onResult: onResult, onBusy: setBusy, onStatus: onStatus,
       onTorch: function (ok) { $('torchBtn').hidden = !ok; } });
     state.scanner.start();
   }
@@ -125,6 +141,7 @@
     $('lookupForm').addEventListener('submit', onSubmit);
     $('nextBtn').addEventListener('click', backToHome);
     $('editBtn').addEventListener('click', editNumber);
+    $('scanBtn').addEventListener('click', function () { if (state.scanner) state.scanner.scan(); });
     $('torchBtn').addEventListener('click', function () {
       state.scanner.toggleTorch().then(function (on) { $('torchBtn').setAttribute('aria-pressed', on ? 'true' : 'false'); });
     });

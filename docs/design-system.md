@@ -40,7 +40,7 @@ Font: **IBM Plex Sans Arabic** (self-hosted woff2 in `public/fonts`, weights 400
 Numerals are shown in Western digits (matches the card and the keyboard). Switch to Arabic-Indic by changing display only, never the stored/parsed values.
 
 ## 4. Components
-- **Viewfinder** — a wide, short strip (`aspect-ratio: 3/1`, ≈ 342×114 at 390px), radius 24px, `--green-200`, four 28px corner brackets in `--primary`; `<video playsinline muted>` fills it (`object-fit: cover`) and the visible strip is exactly what the OCR reads. Hint below: «ضع رقم العضوية داخل الإطار».
+- **Viewfinder** — a wide, short strip (`aspect-ratio: 3/1`, ≈ 342×114 at 390px), radius 24px, `--green-200`, four 28px corner brackets in `--primary`; `<video playsinline muted>` fills it (`object-fit: cover`) and the visible strip is exactly what the OCR reads. Below it a full-width **امسح الرقم** primary button (≥58px; label becomes «جارٍ القراءة…» while reading) and the hint «ضع رقم العضوية داخل الإطار ثم اضغط «امسح الرقم»». A successful scan fills the number box (selected, editable) and the type chip; nothing is submitted automatically.
 - **Loading state** — inside the frame: «جارٍ تجهيز القارئ…» while the engine loads, «جارٍ تشغيل الكاميرا…» while the camera starts; camera-denied text replaces it. Slow/failed-engine notices appear under the frame (14px, 600).
 - **Torch button** — pill inside the frame, bottom centre, ≥44px, white 2px border on dark translucent; `aria-pressed` inverts to white. Hidden when the camera has no torch. Tapping the frame requests a single-shot focus where supported.
 - **Number input** — 60px high, 28px text, centred, `dir=ltr`, `inputmode=numeric`, 2px `--green-300` border → `--primary` on focus.

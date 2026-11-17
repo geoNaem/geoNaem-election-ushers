@@ -19,6 +19,9 @@
 .corner.tl { top: 12px; left: 12px; border-top-width: 4px; border-left-width: 4px; border-top-left-radius: 14px; }
 .corner.br { bottom: 12px; right: 12px; border-bottom-width: 4px; border-right-width: 4px; border-bottom-right-radius: 14px; }
 .corner.bl { bottom: 12px; left: 12px; border-bottom-width: 4px; border-left-width: 4px; border-bottom-left-radius: 14px; }
+.scan-btn { margin-top: var(--s3); background: var(--primary); color: #fff; }
+.scan-btn:active { background: var(--primary-strong); }
+.scan-btn:disabled { opacity: .7; cursor: progress; }
 .scan-help { text-align: center; margin: var(--s3) 0 0; font-weight: 500; color: var(--text-soft); font-size: 15px; }
 .torch { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); min-height: 44px; min-width: 76px; padding: 0 var(--s4); border: 2px solid #fff; border-radius: var(--r-pill); background: rgba(16,38,28,.78); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
 .torch[aria-pressed='true'] { background: #fff; color: var(--green-700); }
