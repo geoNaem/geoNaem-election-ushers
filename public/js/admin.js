@@ -78,13 +78,16 @@
   }
 
   // ================= TRACKING =================
-  var fmtTime = function (iso) {
-    try { return new Date(iso).toLocaleString('ar-EG-u-nu-latn', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
-    catch (e) { return String(iso); }
+  var timeFmt = null;
+  var fmtTime = function (iso) {   // Cairo time, Latin digits, e.g. 19/11/2026 23:15:29
+    try {
+      timeFmt = timeFmt || new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+      return timeFmt.format(new Date(iso)).replace(',', '');
+    } catch (e) { return String(iso); }
   };
   var fmtInt = function (n) { return Number(n).toLocaleString('en-US'); };
   function pct(a, b) { return b ? (a * 100 / b) : 0; }
-  function fmtPct(p) { return (p < 1 && p > 0 ? p.toFixed(2) : p.toFixed(1)) + '%'; }
+  function fmtPct(p) { return (p === 0 ? '0' : p < 0.01 ? p.toFixed(4) : p < 1 ? p.toFixed(2) : p.toFixed(1)) + '%'; }
 
   function renderTrack(d) {
     $('stServed').textContent = fmtInt(d.served); $('stTotal').textContent = fmtInt(d.totalIds);
@@ -98,13 +101,13 @@
     var eb = document.querySelector('#entriesTbl tbody'); eb.textContent = '';
     d.entries.forEach(function (e, i) {
       var tr = el('tr', { class: e.committee === null ? 'nf' : '' }, [
-        el('td', { class: 'num', text: String(d.entriesTotal - i) }), el('td', { class: 'num', text: fmtTime(e.at) }),
+        el('td', { class: 'num', text: String(d.entriesTotal - i) }), el('td', { class: 'num', dir: 'ltr', text: fmtTime(e.at) }),
         el('td', { class: 'num', text: e.suf === '*' ? '—' : String(e.n) }), el('td', { text: e.label }),
         el('td', { class: 'num', text: e.committee === null ? 'غير موجود' : String(e.committee) })]);
       eb.appendChild(tr);
     });
     $('noEntries').hidden = d.entries.length > 0;
-    $('entriesNote').textContent = d.entriesTotal > d.entries.length ? '(آخر ' + d.entries.length + ' من ' + fmtInt(d.entriesTotal) + ')' : '(' + fmtInt(d.entriesTotal) + ')';
+    $('entriesNote').textContent = d.entriesTotal > d.entries.length ? '— آخر ' + d.entries.length + ' من ' + fmtInt(d.entriesTotal) + ' إدخال' : '— ' + fmtInt(d.entriesTotal) + ' إدخال';
     state.entriesTotal = d.entriesTotal;
   }
   function refreshTrack() {
