@@ -7,7 +7,8 @@ const { createFakeDb } = require('./helpers/fake-db');
 
 const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k'.repeat(30), ADMIN_PIN: 'test-pin-123', SESSION_SECRET: 'x'.repeat(32) };
 const ROUTES = { 'GET /api/health': 'health', 'GET /api/blocks': 'blocks', 'POST /api/admin/login': 'login', 'POST /api/admin/logout': 'logout',
-  'GET /api/admin/session': 'session', 'PUT /api/admin/blocks': 'adminBlocks', 'GET /api/admin/audit': 'audit' };
+  'GET /api/admin/session': 'session', 'PUT /api/admin/blocks': 'adminBlocks', 'GET /api/admin/audit': 'audit',
+  'POST /api/serve': 'serve', 'GET /api/admin/served': 'servedAdmin', 'DELETE /api/admin/served': 'servedAdmin' };
 
 function setup(ip = '1.2.3.4') {
   const db = createFakeDb();
@@ -19,8 +20,9 @@ function setup(ip = '1.2.3.4') {
     if (xhr) headers['x-requested-with'] = 'admin';
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (cookie) headers.cookie = cookie;
+    if (xhr === 'usher') headers['x-requested-with'] = 'usher';
     const name = ROUTES[`${method} ${url}`];
-    return api.run(name, { method, headers, body, ip }, deps);
+    return api.run(name, { method, headers, body, ip, query: {} }, deps);
   };
   const login = async pin => {
     const r = await call('POST', '/api/admin/login', { body: { pin } });
@@ -134,6 +136,57 @@ test('client IP = first x-forwarded-for hop', () => {
   assert.equal(api.clientIp({ 'x-forwarded-for': "'; drop table" }), 'unknown');
 });
 
+test('serve: records lookups (committee computed server-side), idempotent, validated, CSRF-guarded', async () => {
+  const t = setup(); const post = (body, xhr = 'usher') => t.call('POST', '/api/serve', { body, xhr });
+  assert.equal((await post({ n: 2367, suf: '' })).body.added, true);
+  assert.equal((await post({ n: 2367, suf: '' })).body.added, false);          // same member again: not counted twice
+  assert.equal((await post({ n: 2367, suf: 'ع' })).body.added, true);           // same number, other type = different member
+  assert.equal((await post({ n: 99999, suf: '' })).status, 200);                // not in the list: recorded as not found
+  assert.equal((await post({ n: 0, suf: '*' })).status, 200); assert.equal((await post({ suf: '*', n: null })).body.added, true);
+  const rows = t.db.state.served;
+  assert.equal(rows.find(r => r.n === 2367 && r.suffix === '').committee, 3);
+  assert.equal(rows.find(r => r.n === 99999).committee, null);
+  assert.equal(rows.filter(r => r.suffix === '*').length, 2);                    // foreign has no number: each lookup counts
+  assert.equal(rows.length, 5);
+  for (const bad of [{ n: 1.5, suf: '' }, { n: 0, suf: '' }, { n: 1000000, suf: '' }, { n: '5', suf: '' }, { n: 5, suf: 'x' }, { n: 5 }, null, 'nope']) assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+  assert.equal((await post({ n: 5, suf: '' }, true)).status, 400);               // wrong header value ('admin') is not the usher header
+  assert.equal((await post({ n: 6, suf: '' }, false)).status, 400);              // no header
+  assert.equal(t.db.state.served.length, 5);
+});
+test('serve: client committee is ignored; `ago` backdates the time (clamped)', async () => {
+  const t = setup(); await t.call('POST', '/api/serve', { body: { n: 1402, suf: '', committee: 77, ago: 120 }, xhr: 'usher' });
+  const r = t.db.state.served[0]; assert.equal(r.committee, 2);
+  assert.ok(Math.abs((t.clock.t - Date.parse(r.at)) / 1000 - 120) < 2);
+  await t.call('POST', '/api/serve', { body: { n: 1403, suf: '', ago: 10 ** 9 }, xhr: 'usher' });
+  assert.ok((t.clock.t - Date.parse(t.db.state.served[1].at)) / 1000 <= 86401);
+});
+test('admin served: stats, percentage, entries newest first; anonymous rejected', async () => {
+  const t = setup();
+  assert.equal((await t.call('GET', '/api/admin/served')).status, 401);
+  for (const b of [{ n: 1, suf: '' }, { n: 2, suf: '' }, { n: 822, suf: 'ع' }, { n: 99999, suf: '' }, { n: 0, suf: '*' }]) { t.clock.t += 1000; await t.call('POST', '/api/serve', { body: b, xhr: 'usher' }); }
+  const { cookie } = await t.login('test-pin-123');
+  const r = await t.call('GET', '/api/admin/served', { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.totalIds, api.TOTAL_IDS); assert.equal(r.body.served, 3); assert.equal(r.body.notFound, 1); assert.equal(r.body.foreign, 1); assert.equal(r.body.entriesTotal, 5);
+  assert.ok(Math.abs(r.body.percent - (3 * 100) / api.TOTAL_IDS) < 1e-9);
+  assert.equal(r.body.bySuffix.find(x => x.suf === '').served, 2); assert.equal(r.body.bySuffix.find(x => x.suf === 'ع').total, 4135);
+  assert.equal(r.body.entries[0].suf, '*'); assert.equal(r.body.entries[1].n, 99999);   // newest first
+  assert.ok(r.body.entries.every(e => typeof e.at === 'string'));
+});
+test('admin served: clear removes everything (needs auth + CSRF header), audited', async () => {
+  const t = setup();
+  await t.call('POST', '/api/serve', { body: { n: 1, suf: '' }, xhr: 'usher' });
+  assert.equal((await t.call('DELETE', '/api/admin/served', { body: {} })).status, 401);
+  const { cookie } = await t.login('test-pin-123');
+  assert.equal((await t.call('DELETE', '/api/admin/served', { body: {}, cookie, xhr: false })).status, 400);
+  assert.equal(t.db.state.served.length, 1);
+  const r = await t.call('DELETE', '/api/admin/served', { body: {}, cookie });
+  assert.equal(r.status, 200); assert.equal(r.body.removed, 1); assert.equal(t.db.state.served.length, 0);
+  assert.equal((await t.call('GET', '/api/admin/served', { cookie })).body.served, 0);
+  assert.ok(t.db.state.audit.some(a => a.action === 'served.clear'));
+  await t.call('POST', '/api/serve', { body: { n: 1, suf: '' }, xhr: 'usher' });            // after a clear the same member counts again
+  assert.equal(t.db.state.served.length, 1);
+});
 test('vercel.json: security headers incl. OCR CSP directives, caching rules, no external hosts', () => {
   const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
   const all = Object.fromEntries(cfg.headers.find(h => h.source === '/(.*)').headers.map(h => [h.key, h.value]));

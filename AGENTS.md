@@ -19,8 +19,8 @@ A small, high-reliability web app used by 20+ ushers at one event (Friday 20/11/
 ## Hard rules
 1. **No inline `<script>` or inline event handlers.** CSP is `script-src 'self'`. Do not loosen it.
 2. **Never build HTML from strings with user/scanned data.** Use `textContent` / DOM APIs (see `el()` in admin.js).
-3. **All admin writes** go through `PUT /api/admin/blocks` with auth cookie + `X-Requested-With: admin` + JSON. Keep validation in `lib/validate.js`; add a test for every new rule.
-4. **No usher login, no personal data.** We store only block config and an audit log. Never log scanned card contents on the server. Never add analytics/third-party scripts or CDNs (fonts and scanner library are self-hosted so it works offline).
+3. **All admin writes** (`PUT /api/admin/blocks`, `DELETE /api/admin/served`) need the auth cookie + `X-Requested-With: admin` + JSON. The only public write is `POST /api/serve` (header `X-Requested-With: usher`; the server computes the committee itself via `lookup.js`). Keep validation in `lib/validate.js`; add a test for every new rule.
+4. **No usher login, no names.** Stored server-side: side config (left/right committees), an audit log, and — by the owner's explicit request — the *membership numbers that were looked up* with type, resulting committee and time (the "people served" table, clearable from /admin). Camera frames, photos and OCR text never leave the device; the usher app sends only `{type, number}` after a lookup. No names, no IPs in that table. Never add analytics/third-party scripts or CDNs (fonts and OCR engine are self-hosted so it works offline).
 5. **Lookup logic lives only in `public/js/lookup.js`.** Do not re-implement it elsewhere; extend its tests (`tests/lookup.test.js`) first.
 6. Arabic UI copy, RTL layout, tap targets ≥ 44px, text contrast ≥ 4.5:1, never colour alone (see `docs/design-system.md`).
 7. Do not add dependencies without a reason written in the PR/commit. Prefer the standard library.

@@ -35,9 +35,42 @@
     return fetchJson('/data/committees.json').then(function (d) { save('committees', d); applyCommittees(d); }).catch(function () {});
   }
 
+  // ---------- "people served" tracking ----------
+  // A lookup is reported to the server (type + number only; the server derives the committee). It is sent when the usher moves on
+  // (التالي) or after a few seconds on the result, so a corrected type/number is not counted twice. Offline lookups are queued.
+  var SERVE_DELAY_MS = 4000, QKEY = 'servedQueue';
+  var pending = null, flushing = false;
+  function enqueueServe(n, suf) {
+    var q = load(QKEY) || [];
+    q.push({ n: suf === '*' ? null : n, suf: suf, t: Date.now() });
+    if (q.length > 500) q.shift();
+    save(QKEY, q); flushServed();
+  }
+  function flushServed() {
+    if (flushing) return;
+    var q = load(QKEY) || [];
+    if (!q.length) return;
+    flushing = true;
+    var it = q[0];
+    fetch('/api/serve', { method: 'POST', headers: { 'X-Requested-With': 'usher', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ n: it.n, suf: it.suf, ago: Math.max(0, Math.round((Date.now() - it.t) / 1000)) }) })
+      .then(function (r) {
+        flushing = false;
+        if (r.ok || (r.status >= 400 && r.status < 500)) { var cur = load(QKEY) || []; cur.shift(); save(QKEY, cur); flushServed(); } // 4xx = unfixable, drop it
+      }).catch(function () { flushing = false; }); // offline / server error: keep it, retry later
+  }
+  function schedulePending(n, suf) {
+    cancelPending();
+    if (suf !== '*' && !(n >= 1)) return;
+    pending = { n: n, suf: suf, timer: setTimeout(flushPending, SERVE_DELAY_MS) };
+  }
+  function cancelPending() { if (pending) { clearTimeout(pending.timer); pending = null; } }
+  function flushPending() { if (!pending) return; var p = pending; cancelPending(); enqueueServe(p.n, p.suf); }
+
   // ---------- result screen ----------
   function showResult(n, suf) {
     state.cur = { n: n, suf: suf };
+    schedulePending(n, suf);
     var committee = state.index ? L.lookup(state.index, suf, n) : null;
     var found = committee !== null;
     var view = $('result');
@@ -67,6 +100,7 @@
     if (navigator.vibrate) navigator.vibrate(found ? 60 : [80, 60, 80]);
   }
   function backToHome() {
+    flushPending();
     $('result').hidden = true;
     $('home').hidden = false; $('top').hidden = false;
     $('num').value = '';
@@ -122,6 +156,7 @@
     msg.className = 'ocr-msg ' + kind;
   }
   function editNumber() {
+    cancelPending();
     var c = state.cur;
     $('result').hidden = true; $('home').hidden = false; $('top').hidden = false;
     $('num').value = c && c.n ? String(c.n) : '';
@@ -150,7 +185,11 @@
     applyCommittees(load('committees')); applyBlocks(load('blocks'));
     refreshCommittees(); refreshBlocks();
     setInterval(refreshBlocks, 30000);
-    window.addEventListener('online', refreshBlocks);
+    window.addEventListener('online', function () { refreshBlocks(); flushServed(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) flushPending(); else flushServed(); });
+    window.addEventListener('pagehide', flushPending);
+    setInterval(flushServed, 20000);
+    flushServed();
     window.addEventListener('offline', function () { setSync(false); });
     // load the OCR engine only after first paint
     var started = false, go = function () { if (!started) { started = true; startScan(); } };

@@ -1,8 +1,9 @@
 (function () {
   'use strict';
   var MAX = 100;
+  var SIDES = { right: 'الجانب الأيمن', left: 'الجانب الأيسر' };   // fixed names: also what ushers see as the committee's place
   var $ = function (id) { return document.getElementById(id); };
-  var state = { blocks: [], sel: 0, dirty: false };
+  var state = { sides: { right: { note: '', committees: [] }, left: { note: '', committees: [] } }, dirty: false, legacy: false, tab: 'places', timer: 0 };
 
   function el(tag, props, kids) {
     var e = document.createElement(tag);
@@ -14,21 +15,21 @@
     return e;
   }
   function api(method, url, body) {
-    var opts = { method: method, headers: { 'X-Requested-With': 'admin' }, credentials: 'same-origin' };
+    var opts = { method: method, headers: { 'X-Requested-With': 'admin' }, credentials: 'same-origin', cache: 'no-store' };
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     return fetch(url, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || r.status); e.status = r.status; throw e; } return j; });
     });
   }
 
-  // ----- model helpers -----
-  function owners() { var m = {}; state.blocks.forEach(function (b, i) { b.committees.forEach(function (c) { m[c] = i; }); }); return m; }
+  // ================= PLACES (left / right) =================
+  function sideOf(c) { if (state.sides.left.committees.indexOf(c) >= 0) return 'left'; if (state.sides.right.committees.indexOf(c) >= 0) return 'right'; return null; }
+  function assign(c, side) {
+    ['left', 'right'].forEach(function (k) { state.sides[k].committees = state.sides[k].committees.filter(function (x) { return x !== c; }); });
+    if (side) state.sides[side].committees.push(c);
+  }
   function markDirty() { state.dirty = true; setSave('dirty', 'تعديلات غير محفوظة'); }
   function setSave(cls, text) { var s = $('saveState'); s.className = 'save-state ' + cls; s.textContent = text; }
-  function assign(committee, idx) {
-    state.blocks.forEach(function (b) { b.committees = b.committees.filter(function (c) { return c !== committee; }); });
-    if (idx !== null) state.blocks[idx].committees.push(committee);
-  }
   function parseRanges(text) {
     var out = [];
     String(text).replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).split(/[,،\s]+/).forEach(function (part) {
@@ -40,67 +41,105 @@
     return out;
   }
 
-  // ----- render -----
-  function render() {
-    var own = owners(), sel = state.sel;
-    // summary
-    var assigned = Object.keys(own).length;
-    $('summary').textContent = assigned + ' من ' + MAX + ' لجنة موزعة · ' + (MAX - assigned) + ' غير موزعة';
-    // blocks list
-    var list = $('blockList'); list.textContent = '';
-    if (!state.blocks.length) list.appendChild(el('p', { class: 'empty', text: 'لا توجد بلوكات بعد. أضف أول بلوك ثم وزّع اللجان عليه.' }));
-    state.blocks.forEach(function (b, i) {
-      var card = el('div', { class: 'block-card' + (i === sel ? ' sel' : ''), onclick: function () { state.sel = i; render(); } });
-      var nameIn = el('input', { class: 'name', type: 'text', maxlength: '40', 'aria-label': 'اسم البلوك', value: b.name,
-        oninput: function (e) { b.name = e.target.value; markDirty(); }, onfocus: function () { if (state.sel !== i) { state.sel = i; renderGrid(); } } });
-      var noteIn = el('input', { type: 'text', maxlength: '120', 'aria-label': 'وصف المكان', placeholder: 'وصف المكان (اختياري) مثل: بجوار المسبح', value: b.note,
-        oninput: function (e) { b.note = e.target.value; markDirty(); }, onfocus: function () { if (state.sel !== i) { state.sel = i; renderGrid(); } } });
-      card.appendChild(el('div', { class: 'block-head' }, [el('span', { class: 'swatch c' + (i % 8), text: String(i + 1) }), nameIn]));
-      card.appendChild(noteIn);
-      card.appendChild(el('div', { class: 'block-meta' }, [
-        el('span', { text: b.committees.length + ' لجنة' }),
-        el('button', { type: 'button', text: 'حذف البلوك', onclick: function (e) { e.stopPropagation(); if (confirm('حذف "' + b.name + '"؟')) { state.blocks.splice(i, 1); state.sel = Math.max(0, Math.min(state.sel, state.blocks.length - 1)); markDirty(); render(); } } }),
-      ]));
-      list.appendChild(card);
-    });
-    renderGrid();
-  }
-  function renderGrid() {
-    var own = owners(), sel = state.sel, g = $('grid'); g.textContent = '';
-    var hasSel = state.blocks.length > 0;
-    $('selHint').textContent = hasSel ? 'البلوك المحدد: ' + (state.blocks[sel].name || '—') : 'أضف بلوكًا أولًا';
-    document.querySelectorAll('.block-card').forEach(function (c, i) { c.classList.toggle('sel', i === sel); });
+  function renderPlaces() {
+    var l = state.sides.left.committees.length, r = state.sides.right.committees.length;
+    $('cntRight').textContent = r + ' لجنة'; $('cntLeft').textContent = l + ' لجنة';
+    $('summary').textContent = state.tab === 'places'
+      ? 'يمين: ' + r + ' · يسار: ' + l + ' · غير موزعة: ' + (MAX - l - r) + (state.legacy ? ' · تنبيه: توجد إعدادات قديمة (بلوكات) وسيتم استبدالها عند الحفظ' : '')
+      : 'متابعة من تمت خدمتهم';
+    var g = $('grid'); g.textContent = '';
     for (var n = 1; n <= MAX; n++) (function (n) {
-      var o = own[n];
-      var cls = 'chip ' + (o === undefined ? 'un' : 'c' + (o % 8)) + (o === sel && hasSel ? ' on-sel' : '');
-      var b = el('button', { type: 'button', class: cls, 'aria-label': 'لجنة ' + n + (o === undefined ? ' غير موزعة' : ' في ' + (state.blocks[o].name || 'بلوك ' + (o + 1))),
-        onclick: function () { if (!hasSel) return; assign(n, own[n] === sel ? null : sel); markDirty(); render(); } }, [el('span', { text: String(n) })]);
-      if (o !== undefined) b.appendChild(el('small', { text: 'ب' + (o + 1) }));
+      var s = sideOf(n);
+      var label = 'لجنة ' + n + (s ? ' على ' + SIDES[s] : ' غير موزعة');
+      var b = el('button', { type: 'button', class: 'chip ' + (s === 'left' ? 'cl' : s === 'right' ? 'cr' : 'un'), 'aria-label': label,
+        onclick: function () { assign(n, s === null ? 'left' : s === 'left' ? 'right' : null); markDirty(); renderPlaces(); } }, [el('span', { text: String(n) })]);
+      if (s) b.appendChild(el('small', { text: s === 'left' ? 'س' : 'ي' }));
       g.appendChild(b);
     })(n);
   }
 
-  // ----- actions -----
-  function addBlock() {
-    var n = state.blocks.length + 1;
-    state.blocks.push({ name: 'بلوك ' + n, note: '', committees: [] });
-    state.sel = state.blocks.length - 1; markDirty(); render();
-  }
   function save() {
-    if (state.blocks.some(function (b) { return !b.name.trim(); })) { setSave('bad', 'اكتب اسمًا لكل بلوك'); return; }
     setSave('', 'جارٍ الحفظ…');
-    api('PUT', '/api/admin/blocks', { blocks: state.blocks.map(function (b) { return { name: b.name.trim(), note: b.note.trim(), committees: b.committees }; }) })
-      .then(function (r) { load(r); state.dirty = false; setSave('ok', 'تم الحفظ'); render(); })
-      .catch(function (e) { if (e.status === 401) { showLogin(); } else setSave('bad', 'تعذّر الحفظ: ' + e.message); });
+    var blocks = ['left', 'right'].map(function (k) { return { name: SIDES[k], note: state.sides[k].note.trim(), committees: state.sides[k].committees.slice().sort(function (a, b) { return a - b; }) }; });
+    api('PUT', '/api/admin/blocks', { blocks: blocks })
+      .then(function (r) { load(r); state.dirty = false; setSave('ok', 'تم الحفظ'); renderPlaces(); })
+      .catch(function (e) { if (e.status === 401) showLogin(); else setSave('bad', 'تعذّر الحفظ: ' + e.message); });
   }
+  // Server blocks -> the two fixed sides. Anything else (blocks from the old design) is ignored and replaced on the next save.
   function load(data) {
-    state.blocks = data.blocks.map(function (b) { return { name: b.name, note: b.note || '', committees: b.committees.slice() }; });
-    if (state.sel >= state.blocks.length) state.sel = 0;
+    var matched = 0;
+    ['left', 'right'].forEach(function (k) {
+      var b = (data.blocks || []).filter(function (x) { return x.name === SIDES[k]; })[0];
+      state.sides[k] = b ? { note: b.note || '', committees: b.committees.slice() } : { note: '', committees: [] };
+      if (b) matched++;
+    });
+    state.legacy = (data.blocks || []).length > matched;
+    $('noteRight').value = state.sides.right.note; $('noteLeft').value = state.sides.left.note;
   }
-  function showLogin() { $('editorView').hidden = true; $('loginView').hidden = false; $('pin').value = ''; $('pin').focus(); }
+
+  // ================= TRACKING =================
+  var fmtTime = function (iso) {
+    try { return new Date(iso).toLocaleString('ar-EG-u-nu-latn', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
+    catch (e) { return String(iso); }
+  };
+  var fmtInt = function (n) { return Number(n).toLocaleString('en-US'); };
+  function pct(a, b) { return b ? (a * 100 / b) : 0; }
+  function fmtPct(p) { return (p < 1 && p > 0 ? p.toFixed(2) : p.toFixed(1)) + '%'; }
+
+  function renderTrack(d) {
+    $('stServed').textContent = fmtInt(d.served); $('stTotal').textContent = fmtInt(d.totalIds);
+    $('stPct').textContent = fmtPct(d.percent); $('stNotFound').textContent = fmtInt(d.notFound); $('stForeign').textContent = fmtInt(d.foreign);
+    $('stBar').style.width = Math.min(100, d.percent) + '%';
+    document.querySelector('.bar-track').setAttribute('aria-valuenow', String(Math.round(d.percent * 10) / 10));
+    var tb = document.querySelector('#typeTbl tbody'); tb.textContent = '';
+    d.bySuffix.forEach(function (x) {
+      tb.appendChild(el('tr', {}, [el('td', { text: x.label }), el('td', { class: 'num', text: fmtInt(x.served) }), el('td', { class: 'num', text: fmtInt(x.total) }), el('td', { class: 'num', text: fmtPct(pct(x.served, x.total)) })]));
+    });
+    var eb = document.querySelector('#entriesTbl tbody'); eb.textContent = '';
+    d.entries.forEach(function (e, i) {
+      var tr = el('tr', { class: e.committee === null ? 'nf' : '' }, [
+        el('td', { class: 'num', text: String(d.entriesTotal - i) }), el('td', { class: 'num', text: fmtTime(e.at) }),
+        el('td', { class: 'num', text: e.suf === '*' ? '—' : String(e.n) }), el('td', { text: e.label }),
+        el('td', { class: 'num', text: e.committee === null ? 'غير موجود' : String(e.committee) })]);
+      eb.appendChild(tr);
+    });
+    $('noEntries').hidden = d.entries.length > 0;
+    $('entriesNote').textContent = d.entriesTotal > d.entries.length ? '(آخر ' + d.entries.length + ' من ' + fmtInt(d.entriesTotal) + ')' : '(' + fmtInt(d.entriesTotal) + ')';
+    state.entriesTotal = d.entriesTotal;
+  }
+  function refreshTrack() {
+    $('trackState').className = 'save-state'; $('trackState').textContent = 'جارٍ التحديث…';
+    return api('GET', '/api/admin/served?limit=200').then(function (d) {
+      renderTrack(d); $('trackState').className = 'save-state ok'; $('trackState').textContent = 'آخر تحديث: ' + fmtTime(new Date().toISOString());
+    }).catch(function (e) { if (e.status === 401) showLogin(); else { $('trackState').className = 'save-state bad'; $('trackState').textContent = 'تعذّر التحديث'; } });
+  }
+  function startPolling() { stopPolling(); state.timer = setInterval(function () { if (!document.hidden && state.tab === 'track' && $('confirmBox').hidden) refreshTrack(); }, 15000); }
+  function stopPolling() { if (state.timer) clearInterval(state.timer); state.timer = 0; }
+
+  function askClear() {
+    $('confirmText').textContent = 'سيتم حذف جميع السجلات' + (state.entriesTotal ? ' (' + fmtInt(state.entriesTotal) + ')' : '') + ' وكأن أي رقم لم يتم إدخاله، ولا يمكن التراجع عن ذلك.';
+    $('confirmBox').hidden = false; $('confirmNo').focus();
+  }
+  function doClear() {
+    $('confirmYes').disabled = true;
+    api('DELETE', '/api/admin/served', {}).then(function () { $('confirmBox').hidden = true; return refreshTrack(); })
+      .catch(function (e) { if (e.status === 401) showLogin(); else { $('trackState').className = 'save-state bad'; $('trackState').textContent = 'تعذّر المسح'; } })
+      .then(function () { $('confirmYes').disabled = false; });
+  }
+
+  // ================= tabs / views =================
+  function setTab(tab) {
+    state.tab = tab;
+    $('tabPlaces').setAttribute('aria-selected', String(tab === 'places')); $('tabTrack').setAttribute('aria-selected', String(tab === 'track'));
+    $('placesView').hidden = tab !== 'places'; $('trackView').hidden = tab !== 'track';
+    $('saveBtn').hidden = tab !== 'places'; $('saveState').hidden = tab !== 'places';
+    if (tab === 'track') { refreshTrack(); startPolling(); } else stopPolling();
+    renderPlaces();
+  }
+  function showLogin() { stopPolling(); $('editorView').hidden = true; $('loginView').hidden = false; $('pin').value = ''; $('pin').focus(); }
   function showEditor() {
     $('loginView').hidden = true; $('editorView').hidden = false;
-    fetch('/api/blocks', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) { load(d); setSave('', ''); render(); });
+    fetch('/api/blocks', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) { load(d); setSave('', ''); setTab('places'); });
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -112,12 +151,28 @@
     });
     $('logoutBtn').addEventListener('click', function () { api('POST', '/api/admin/logout', {}).finally(showLogin); });
     $('saveBtn').addEventListener('click', save);
-    $('addBlock').addEventListener('click', addBlock);
-    $('clearBlock').addEventListener('click', function () { if (state.blocks[state.sel]) { state.blocks[state.sel].committees = []; markDirty(); render(); } });
-    $('rangeForm').addEventListener('submit', function (e) {
-      e.preventDefault(); if (!state.blocks.length) return;
-      parseRanges($('rangeIn').value).forEach(function (c) { assign(c, state.sel); });
-      $('rangeIn').value = ''; markDirty(); render();
+    $('tabPlaces').addEventListener('click', function () { setTab('places'); });
+    $('tabTrack').addEventListener('click', function () { setTab('track'); });
+    $('refreshBtn').addEventListener('click', refreshTrack);
+    $('clearAllBtn').addEventListener('click', askClear);
+    $('confirmNo').addEventListener('click', function () { $('confirmBox').hidden = true; });
+    $('confirmYes').addEventListener('click', doClear);
+
+    ['right', 'left'].forEach(function (k) {
+      var cap = k === 'right' ? 'Right' : 'Left';
+      $('note' + cap).addEventListener('input', function (e) { state.sides[k].note = e.target.value; markDirty(); });
+      $('form' + cap).addEventListener('submit', function (e) {
+        e.preventDefault(); parseRanges($('range' + cap).value).forEach(function (c) { assign(c, k); });
+        $('range' + cap).value = ''; markDirty(); renderPlaces();
+      });
+      $('clear' + cap).addEventListener('click', function () { state.sides[k].committees = []; markDirty(); renderPlaces(); });
+    });
+    $('splitForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var at = parseInt(String($('splitAt').value).replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }), 10);
+      if (!(at >= 1 && at <= MAX)) return;
+      for (var c = 1; c <= MAX; c++) assign(c, c <= at ? 'left' : 'right');
+      markDirty(); renderPlaces();
     });
     window.addEventListener('beforeunload', function (e) { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
     api('GET', '/api/admin/session').then(function (s) { if (s.authed) showEditor(); else showLogin(); }).catch(showLogin);

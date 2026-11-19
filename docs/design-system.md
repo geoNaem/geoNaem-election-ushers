@@ -49,7 +49,8 @@ Numerals are shown in Western digits (matches the card and the keyboard). Switch
 - **Result ring** — 290px mint disc, 228px white disc, 6px `--primary` border, label + number. Not-found state swaps to red tokens and shows "؟".
 - **Facts card** — rows: **الرقم المقروء** (20px bold + **عدّل الرقم** link-button ≥44px that returns to the form pre-filled) · نوع العضوية (the same type chips; tapping one re-runs the lookup immediately) · **مكان اللجنة** (block name 22px bold + optional note). If the committee has no block yet: "لم يُحدَّد المكان بعد" (muted).
 - **Sync pill** (header) — "محدّث" (mint) / "غير متصل — آخر نسخة محفوظة" (red tint).
-- **Admin** — block cards (name, place note, count, delete), committee grid 1–100 (chips coloured by block with a `ب<number>` label; unassigned = dashed border), range input (`1-12, 20`), sticky bar with save state.
+- **Admin (current)** — tabs **الأماكن / المتابعة**; places = two side panels (right panel on the physical right: tag «ي»; left: «س»; description + range input + أفرغ), a quick-split row, and the 1–100 grid (chip = number + side letter; dashed = unassigned; tap cycles none→left→right). Tracking = stat cards (served, total, **percentage with progress bar**, not found, foreign), per-type table, entries table (#, time, number, type, committee; not-found rows in red), refresh, and a red **مسح كل السجلات** with an inline «هل أنت متأكد؟» confirmation box.
+- **Admin (old, replaced)** — block cards (name, place note, count, delete), committee grid 1–100 (chips coloured by block with a `ب<number>` label; unassigned = dashed border), range input (`1-12, 20`), sticky bar with save state.
 - Block colours: 8 mint/green/teal steps (`.c0–.c7` in `admin.css`) that differ in **lightness**, plus the block number on every chip.
 
 ## 5. RTL & accessibility rules

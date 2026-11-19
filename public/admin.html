@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>إدارة أماكن اللجان</title>
+<title>إدارة اللجان</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/css/base.css">
 <link rel="stylesheet" href="/css/admin.css">
@@ -12,7 +12,7 @@
 <body>
 <section id="loginView" class="login" hidden>
   <form id="loginForm" class="login-card" autocomplete="off">
-    <h1>إدارة أماكن اللجان</h1>
+    <h1>إدارة اللجان</h1>
     <label for="pin">الرقم السري للإدارة</label>
     <input id="pin" type="password" autocomplete="current-password" required>
     <p id="loginErr" class="err" role="alert" hidden></p>
@@ -23,9 +23,13 @@
 <div id="editorView" class="editor" hidden>
   <header class="bar">
     <div>
-      <h1>أماكن اللجان</h1>
+      <h1>إدارة اللجان</h1>
       <p id="summary" class="summary" role="status"></p>
     </div>
+    <nav class="tabs" role="tablist" aria-label="أقسام الإدارة">
+      <button id="tabPlaces" type="button" role="tab" aria-selected="true" aria-controls="placesView">الأماكن</button>
+      <button id="tabTrack" type="button" role="tab" aria-selected="false" aria-controls="trackView">المتابعة</button>
+    </nav>
     <div class="bar-actions">
       <span id="saveState" class="save-state" role="status"></span>
       <button id="saveBtn" type="button" class="btn primary small">حفظ</button>
@@ -33,26 +37,69 @@
     </div>
   </header>
 
-  <div class="layout">
-    <aside class="blocks" aria-label="البلوكات">
-      <div id="blockList"></div>
-      <button id="addBlock" type="button" class="btn outline">+ إضافة بلوك</button>
-    </aside>
-
-    <section class="grid-panel" aria-label="اللجان">
-      <div class="grid-tools">
-        <p id="selHint" class="sel-hint"></p>
-        <form id="rangeForm" class="range-form" autocomplete="off">
-          <label for="rangeIn" class="vh">أرقام اللجان</label>
-          <input id="rangeIn" type="text" inputmode="numeric" placeholder="مثال: 1-12, 20, 25-30">
-          <button type="submit" class="btn outline small">أضف للبلوك المحدد</button>
-          <button id="clearBlock" type="button" class="btn ghost small">أفرغ البلوك</button>
+  <section id="placesView" class="pane" aria-label="الأماكن">
+    <div class="sides">
+      <section class="side right" aria-label="الجانب الأيمن">
+        <div class="side-head"><span class="side-tag r">ي</span><h2>الجانب الأيمن</h2><span id="cntRight" class="count"></span></div>
+        <input id="noteRight" type="text" maxlength="120" aria-label="وصف الجانب الأيمن" placeholder="وصف المكان (اختياري) مثل: بجوار المسبح">
+        <form id="formRight" class="range-form" autocomplete="off">
+          <label for="rangeRight" class="vh">أرقام اللجان على الجانب الأيمن</label>
+          <input id="rangeRight" type="text" inputmode="numeric" placeholder="مثال: 51-100">
+          <button type="submit" class="btn outline small">أضف</button>
+          <button id="clearRight" type="button" class="btn ghost small">أفرغ</button>
         </form>
+      </section>
+      <section class="side left" aria-label="الجانب الأيسر">
+        <div class="side-head"><span class="side-tag l">س</span><h2>الجانب الأيسر</h2><span id="cntLeft" class="count"></span></div>
+        <input id="noteLeft" type="text" maxlength="120" aria-label="وصف الجانب الأيسر" placeholder="وصف المكان (اختياري) مثل: بجوار البوابة">
+        <form id="formLeft" class="range-form" autocomplete="off">
+          <label for="rangeLeft" class="vh">أرقام اللجان على الجانب الأيسر</label>
+          <input id="rangeLeft" type="text" inputmode="numeric" placeholder="مثال: 1-50">
+          <button type="submit" class="btn outline small">أضف</button>
+          <button id="clearLeft" type="button" class="btn ghost small">أفرغ</button>
+        </form>
+      </section>
+    </div>
+
+    <form id="splitForm" class="split" autocomplete="off">
+      <label for="splitAt">تقسيم سريع: اللجان من 1 إلى</label>
+      <input id="splitAt" type="text" inputmode="numeric" value="50" aria-label="آخر لجنة على الجانب الأيسر">
+      <span>على الجانب الأيسر، والباقي على الجانب الأيمن</span>
+      <button type="submit" class="btn outline small">طبّق</button>
+    </form>
+
+    <div id="grid" class="grid"></div>
+    <p class="legend">اضغط على رقم لجنة لتغيير مكانها: غير موزعة ← يسار (س) ← يمين (ي) ← غير موزعة. اللجان بخط متقطع لم تُوزَّع بعد. لا تنسَ الضغط على «حفظ».</p>
+  </section>
+
+  <section id="trackView" class="pane" aria-label="المتابعة" hidden>
+    <div class="track-tools">
+      <button id="refreshBtn" type="button" class="btn outline small">تحديث</button>
+      <span id="trackState" class="save-state" role="status"></span>
+      <button id="clearAllBtn" type="button" class="btn danger small">مسح كل السجلات</button>
+    </div>
+    <div id="confirmBox" class="confirm" role="alertdialog" aria-labelledby="confirmTitle" hidden>
+      <p id="confirmTitle" class="confirm-title">هل أنت متأكد؟</p>
+      <p id="confirmText" class="confirm-text"></p>
+      <div class="confirm-actions">
+        <button id="confirmYes" type="button" class="btn danger small">نعم، امسح كل السجلات</button>
+        <button id="confirmNo" type="button" class="btn ghost small">إلغاء</button>
       </div>
-      <div id="grid" class="grid"></div>
-      <p class="legend">اضغط على رقم لجنة لإضافتها للبلوك المحدد، واضغط عليها مرة أخرى لإزالتها. اللجان بخط متقطع لم تُوزَّع بعد.</p>
-    </section>
-  </div>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="card-label">تمت خدمتهم</div><div id="stServed" class="card-num">—</div></div>
+      <div class="card"><div class="card-label">إجمالي الأعضاء في الكشف</div><div id="stTotal" class="card-num">—</div></div>
+      <div class="card hl"><div class="card-label">النسبة</div><div id="stPct" class="card-num">—</div>
+        <div class="bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="نسبة من تمت خدمتهم"><div id="stBar" class="bar-fill"></div></div></div>
+      <div class="card"><div class="card-label">أرقام غير موجودة</div><div id="stNotFound" class="card-num">—</div></div>
+      <div class="card"><div class="card-label">أجانب / سياسي / لاجئ</div><div id="stForeign" class="card-num">—</div></div>
+    </div>
+    <h2 class="sub">حسب نوع العضوية</h2>
+    <div class="table-wrap"><table class="tbl" id="typeTbl"><thead><tr><th>النوع</th><th>تمت خدمتهم</th><th>الإجمالي</th><th>النسبة</th></tr></thead><tbody></tbody></table></div>
+    <h2 class="sub">آخر الإدخالات <span id="entriesNote" class="count"></span></h2>
+    <div class="table-wrap"><table class="tbl" id="entriesTbl"><thead><tr><th>#</th><th>الوقت</th><th>رقم العضوية</th><th>النوع</th><th>اللجنة</th></tr></thead><tbody></tbody></table></div>
+    <p id="noEntries" class="empty" hidden>لا توجد إدخالات بعد.</p>
+  </section>
 </div>
 <script src="/js/admin.js"></script>
 </body>

@@ -15,7 +15,7 @@
  │ sw.js (offline shell)     │           └─────────────────────────────────┘
  └───────────────────────────┘
 ```
-**Key decision:** the committee lookup runs **in the browser** from `committees.json`. The server never sees scanned IDs. Load is therefore trivial (static files + one tiny JSON poll every 30 s per usher) and a network outage cannot stop lookups.
+**Key decision:** the committee lookup runs **in the browser** from `committees.json` (works offline). After a lookup the usher app reports `{type, number}` to `POST /api/serve` for the "people served" count (section 4/5); images and OCR text never leave the device. Load is therefore trivial (static files + one tiny JSON poll every 30 s per usher) and a network outage cannot stop lookups.
 
 ## 3. Logic (the PDF)
 - Source: `data/source/*.pdf` → `scripts/extract_committees.py` → `data/committees.json`: `rows: [suffix, from, to, committee]`.
@@ -32,6 +32,9 @@ block_committees(committee int PK 1..100  -- a committee belongs to at most one 
 config(key PK, value)                    -- blocks_version counter (bumped on every save)
 audit_log(id, at, action, ip, detail)    -- login.ok / login.fail / blocks.replace
 login_attempts(id, ip, at)               -- persistent login rate limit; pruned after 1 day
+served(id, at, suffix, n, committee)     -- people served: one row per (type, number), first lookup time; committee NULL = not on the list;
+                                          -- foreign '*' has no number (n NULL) so each lookup is a row. UNIQUE(suffix, n).
+record_served() / served_stats() / clear_served()  -- idempotent insert (p_ago back-dates offline lookups), counters, wipe + audit row
 get_blocks() / replace_blocks(jsonb, ip) -- one transaction: delete all, re-insert, bump version, audit
 ```
 Access: RLS enabled on every table with **no policies**; all grants revoked from `public/anon/authenticated`; functions executable only by `service_role`. The browser never talks to Supabase; only the Vercel Functions do, with the service-role key (env var, server-side only). Verified: the anon/publishable key gets 401 on every table and function.
@@ -44,9 +47,17 @@ Access: RLS enabled on every table with **no policies**; all grants revoked from
 | `POST /api/admin/login` | CSRF hdr | `{pin}` → sets `adm` cookie (HttpOnly, SameSite=Strict, Secure, 8 h). 5 failures / 15 min / IP (stored in Postgres) → 429 + Retry-After |
 | `POST /api/admin/logout` | CSRF hdr | clears cookie |
 | `GET /api/admin/session` | cookie | `{authed}` |
+| `POST /api/serve` | `X-Requested-With: usher` + JSON | `{suf, n, ago?}` → records the lookup; the committee is computed server-side from the official list; idempotent per (type, number) |
+| `GET /api/admin/served?limit=200` | cookie | `{totalIds, served, foreign, notFound, percent, bySuffix[], entries[] newest first, entriesTotal}` |
+| `DELETE /api/admin/served` | cookie + CSRF hdr | removes every entry (audited as `served.clear`) |
 | `PUT /api/admin/blocks` | cookie + CSRF hdr | `{blocks:[{name,note,committees:[int]}]}` full replace. 400 on: >30 blocks, bad name/note, committee ∉ 1..100, committee in two blocks, duplicate names |
 | `GET /api/admin/audit` | cookie | last 50 audit entries |
 CSRF header = `X-Requested-With: admin` + `Content-Type: application/json` (no CORS is enabled, so other sites cannot send these).
+
+## 5a. Places = two sides, tracking = people served
+**Places:** the admin page has two fixed sides, **الجانب الأيمن** and **الجانب الأيسر** (stored as two blocks with these names, so the API/DB did not change). Each side holds committees (range input like `51-100`, quick split "1..N on the left, the rest on the right", or tap a committee to cycle none → left → right → none) and an optional description. Ushers see the side name (+ description) on the result. Blocks created by the old design are ignored by the new UI and replaced on the next save.
+**Tracking tab:** cards (served = distinct found numbers, total numbers on the official list = 85,500, percentage, not-found, foreign), a per-type table, and the latest 200 entries with a Cairo-time timestamp (refreshes every 15 s). **مسح كل السجلات** shows a "هل أنت متأكد؟" box and then deletes everything (the same member can then be counted again).
+**Counting rules:** one entry per (type, number) — looking the same member up again is not counted twice (time = first lookup). Foreign (committee 100, no number) counts per lookup and is excluded from the percentage. A lookup is sent when the usher taps التالي or after 4 s on the result (a corrected type or number is therefore not double counted; "عدّل الرقم" cancels it). Offline lookups are queued in localStorage (max 500) and sent when back online with their original time (`ago`, max 24 h).
 
 ## 6. Front end
 Static files, no build step. `app.js` (usher) and `admin.js` are plain ES5-style modules wrapped in IIFEs; DOM built with `textContent`/`createElement`. State: `localStorage` keys `committees`, `blocks` (fallback when offline). `sw.js` precaches the shell (stale-while-revalidate) so the app starts with no network. Camera + number reader: see §6a. Results pause the reader; **التالي** resumes it. Same number within 3 s is ignored.
@@ -83,4 +94,5 @@ Env (Production + Preview): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_
 4. No framework/build — fewer failure points; the whole app is ~1k lines.
 5. Blocks are public read — they only say where a committee is, not who anyone is.
 6. **Number scanner = on-device OCR (tesseract.js) instead of barcode/QR (html5-qrcode).** The cards carry a printed membership number; no barcode contents were confirmed. OCR keeps the privacy rule (nothing leaves the device) and works offline once the ~14 MB engine is cached. Cost: slower and less reliable than a barcode → consensus rule, edit/type chips, manual fallback, accuracy gate. CSP gains `'wasm-unsafe-eval'` and `worker-src blob:` (see security-qa).
+8. **People-served tracking stores membership numbers server-side (owner's explicit request, supersedes "scans never reach the server" for numbers only).** Minimal data: type, number, resulting committee, time. No names, no IP, no device id. Clearable by an admin. The public write endpoint is unauthenticated (ushers have no login): it validates strictly, is idempotent, and anyone who can reach the site could inflate the count (accepted; the table can be wiped).
 7. **Hosting: Vercel Functions + Supabase Postgres instead of Express + SQLite (DONE).** SQLite cannot persist on Vercel. Rate limiting moved to Postgres so it survives cold starts; whole-config replace is one SQL function (atomic).

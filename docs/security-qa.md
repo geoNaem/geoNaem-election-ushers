@@ -1,8 +1,8 @@
 # Security & quality assurance
 
 ## 1. Data & privacy
-- **No personal data stored.** Only block names/notes/committee numbers and an audit log (event type, IP, short detail).
-- Scanned IDs are processed **in the browser only**; the server never receives them. Do not add server-side logging of scans.
+- **No names stored.** Stored: side config, an audit log (event type, IP, short detail) and the "people served" table (membership number + type + committee + time; no names/IPs), clearable by an admin.
+- Lookups are computed **in the browser**; after a lookup only `{type, number}` is sent to `/api/serve` for the served count. Never send or store photos, OCR text or scan attempts.
 - All assets self-hosted (no CDN, no analytics, no external fonts, OCR engine + language data included) → no third-party data leaks; app works offline.
 - **Camera frames and OCR text stay on the device**: the scanner has no fetch/upload/storage/logging; `connect-src 'self'` and the API have no scan endpoint.
 
@@ -24,11 +24,12 @@
 | T11 | DoS at the venue | Static serving + tiny JSON; SQLite WAL; ushers keep working from cache if server is slow | load test (plan) |
 | T12 | Wrong committee shown | Pure-logic unit tests over **every** range boundary; extraction sanity checks | lookup.test |
 
+| T16 | Forged/inflated served count, spam on the public write endpoint | strict validation (type whitelist, integer 1..999999), JSON + `X-Requested-With: usher`, idempotent per member, committee computed server-side, `ago` clamped to 24 h; admin can wipe (auth + CSRF + confirm) | api.test (serve, clear) |
 | T15 | Database exposure | RLS on, no policies, grants revoked for anon/authenticated; service-role key only in Vercel env, never in `public/` | anon-key lockout check; api.test scans `public/` |
 
 Residual risks accepted: shared PIN (anyone who knows it is an admin — rotate it after the event); blocks endpoint is public; the repo is public (no secrets in it).
 
-## 3. Automated tests (`npm test`, 21 tests)
+## 3. Automated tests (`npm test`, 35 tests)
 Lookup: every range start/end/midpoint, known values from the PDF, out-of-range → null, all 100 committees reachable, scan parsing (Arabic digits, suffixes). OCR: digit normalisation, confusion fixes, suffix extraction, implausible reads, consensus (N frames, reset, high confidence, 3 s cooldown), preprocessing. API: anonymous rejected, login/cookie flags, rate limit, CSRF guard, save + public read + audit, validation matrix, security headers.
 
 ## 4. Manual QA checklist (run on a real phone, HTTPS URL)
@@ -36,6 +37,8 @@ Lookup: every range start/end/midpoint, known values from the PDF, out-of-range 
 - [ ] Scan 5 real cards of different types (working, ع, د, Port Said, foreign); confirm the **recognised number** equals the printed one; run `npm run ocr:eval` on >= 20 labelled photos (target >= 95%).
 - [ ] OCR conditions: bright indoor, dim room (torch on/off), window daylight, glare on laminate, 15–20° tilt, worn/scratched card, hand shake. Note read time (target <= 2 s).
 - [ ] Wrong read: tap **عدّل الرقم**, number is pre-filled, fix and look up. Change the type chip on the result: committee updates instantly.
+- [ ] Sides: set 1–50 left / 51–100 right (quick split), save; a result for committee 7 shows الجانب الأيسر and 77 shows الجانب الأيمن.
+- [ ] Tracking: look up 3 numbers (one twice) → served = 3 distinct, times in Cairo time; not-found number appears red and is not counted as served; مسح كل السجلات asks هل أنت متأكد؟, cancel keeps data, confirm empties everything and the percentage returns to 0. Airplane-mode lookups appear after reconnecting.
 - [ ] Digit scripts: scan cards printing Western digits AND Arabic-Indic digits; both must fill the box correctly (Arabic-Indic accuracy is only validated on synthetic fonts so far).
 - [ ] Camera permission denied: message + manual entry works. Slow phone: slow notice, manual works. Torch button only where supported.
 - [ ] Offline first load of the scanner (airplane mode after one online visit): OCR still loads from cache; check cache size (~14 MB) on low-storage phones.

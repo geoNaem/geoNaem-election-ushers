@@ -1,5 +1,5 @@
 /* Offline support: the lookup works with no network after the first visit. */
-var CACHE = 'ushers-v4';
+var CACHE = 'ushers-v5';
 var OCR_VERSION = 'ocr-tess7.0.0-core7.0.0-eng1.0.0'; // bump when /ocr files change
 var OCR_CACHE = 'ushers-' + OCR_VERSION;
 var OCR_FILES = ['/ocr/t7.0.0/tesseract.min.js', '/ocr/t7.0.0/worker.min.js', '/ocr/t7.0.0/tesseract-core-relaxedsimd-lstm.wasm.js', '/ocr/t7.0.0/tesseract-core-simd-lstm.wasm.js', '/ocr/t7.0.0/tesseract-core-lstm.wasm.js', '/ocr/t7.0.0/lang/eng.traineddata.gz'];
